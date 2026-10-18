@@ -138,11 +138,18 @@ pull requests at the moment, so distribution is a standalone package:
 
 1. Create a public GitHub repository for this directory and push it.
 2. Add the GitHub topic **`dsh-plugin`** so the plugin is discoverable.
-3. Optionally publish to npm after confirming the name is free:
-   `npm view dsh-btw version` → if it is taken, publish under a scope
-   (for example `@your-scope/dsh-btw`) and update this README.
+3. **The npm name `dsh-btw` is already taken** (by an independent community
+   plugin implementing a similar idea, `github.com/iluluyu/dsh-btw`, v0.0.3).
+   Do not publish unscoped. Publish under a scope instead (for example
+   `@your-scope/dsh-btw`, which changes the package `name` and therefore the
+   patch row `name` and the installed row id after a rename), or pick a
+   different unscoped name. The DSH plugin identity used by the local/bundle
+   install is `dsh-btw`; publishing is optional and does not affect it.
 4. Announcing it in the upstream repository's Discussions is welcome; do not
    expect a reply.
+
+This package is an independent implementation of the `/btw` idea. It does not
+reuse code from the existing community package of the same name.
 
 ## License
 
