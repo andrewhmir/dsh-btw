@@ -32,11 +32,27 @@ export const PLUGIN_ID = 'dsh-btw';
  * never a glob: the host half's `src/host/*` modules import `node:` builtins
  * that do not exist in a browser.
  */
-export const CLIENT_MODULES = [];
+export const CLIENT_MODULES = [
+  'src/client/styles.mjs',
+  'src/client/view-model.mjs',
+  'src/client/store.mjs',
+  'src/client/stream.mjs',
+  'src/client/trigger.mjs',
+  'src/client/overlay.mjs',
+];
 
-/** Resolve an import specifier to the module key it lives under. */
+/** Resolve an import specifier to the module namespace key it lives under. */
 function keyFor(specifier) {
-  return path.basename(specifier).replace(/\.mjs$/, '');
+  return safeKey(path.basename(specifier).replace(/\.mjs$/, ''));
+}
+
+/**
+ * Make a module basename usable as a JS identifier (`view-model` -> `viewModel`).
+ * @param {string} basename - module basename without extension.
+ * @returns {string} a valid identifier-ish namespace key.
+ */
+function safeKey(basename) {
+  return basename.replace(/-+([a-zA-Z0-9])/g, (_, character) => character.toUpperCase());
 }
 
 /**
@@ -92,10 +108,11 @@ function transformModule(name, source) {
 
   const declared = source.match(/^export\s+(?:async\s+function|function|class|const|let|var)\s+([A-Za-z_$][\w$]*)/gm) ?? [];
   const names = declared.map((m) => m.replace(/^export\s+(?:async\s+function|function|class|const|let|var)\s+/, ''));
+  const key = safeKey(name);
 
   return [
     `// ---- ${name}.mjs ${'-'.repeat(Math.max(0, 60 - name.length))}`,
-    `__dsh_btw.${name} = (function () {`,
+    `__dsh_btw.${key} = (function () {`,
     out.trim(),
     '  var api = {};',
     ...names.map((n) => `  api.${n} = api.${n} ?? ${n};`),
