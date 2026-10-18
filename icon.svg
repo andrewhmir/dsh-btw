@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Side question">
+  <path d="M7 12h34a7 7 0 0 1 7 7v17a7 7 0 0 1-7 7H24l-11 9v-9H7a7 7 0 0 1-7-7V19a7 7 0 0 1 7-7Z" fill="#2f6f4f"/>
+  <path d="M47 28h9a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5h-3v7l-8-7h-3a5 5 0 0 1-5-5v-5" fill="#9fd8b8"/>
+  <circle cx="16" cy="27" r="2.6" fill="#eaf6ee"/>
+  <circle cx="25" cy="27" r="2.6" fill="#eaf6ee"/>
+  <circle cx="34" cy="27" r="2.6" fill="#eaf6ee"/>
+</svg>
