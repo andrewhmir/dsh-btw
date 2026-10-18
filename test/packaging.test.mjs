@@ -67,3 +67,17 @@ test('no machine-specific absolute paths or secrets in shipped code', () => {
     assert.ok(!/C:\\Users\\/i.test(readFileSync(new URL(rel, root), 'utf8')), rel);
   }
 });
+
+test('README documents install, semantics, limits and publishing; MOUNT documents this machine', () => {
+  const readme = readFileSync(new URL('README.md', root), 'utf8');
+  for (const heading of ['## Install', '## How it works', '## Known limitations', '## Publishing', '## Verify']) {
+    assert.ok(readme.includes(heading), heading);
+  }
+  assert.ok(readme.includes('dsh-plugin'), 'GitHub topic instruction');
+  assert.ok(readme.includes('ephemeral') || readme.includes('not saved'), 'ephemerality claim');
+  const mount = readFileSync(new URL('MOUNT.md', root), 'utf8');
+  assert.ok(mount.includes('install_bundle'));
+  assert.ok(mount.includes('dsh_andrew'));
+  assert.ok(mount.includes('remove_bundle') || mount.includes('Revert'));
+  assert.ok(!/sk-[A-Za-z0-9]{20,}/.test(readme + mount), 'no secrets in docs');
+});
