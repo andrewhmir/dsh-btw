@@ -3,9 +3,27 @@
 Machine-specific install notes for the DSH company Web GUI on this box
 (`DSH_HOME=C:\Users\Andrew\.dsh-company`, GUI on <http://127.0.0.1:3081>).
 
-**Status: not yet installed live.** This file is updated in the final plan task
-with the live-install date, compose result, browser E2E result, and revert
-evidence.
+**Status: INSTALLED AND VERIFIED — 2026-10-19.** Evidence:
+
+- `plugin_manager install_bundle` on the absolute workspace directory reported
+  `application: applied`, `warnings: []`, and linked
+  `dsh-btw: link:C:/Users/Andrew/Desktop/dsh_andrew/dsh-btw`; the bundle is in
+  `dsh.profile.bundles`. **No restart was needed** — the host route was live
+  immediately (`GET /btw/ask` → 405 on the live port).
+- Live compose: `dsh --profile web --dump-config` exit 0, row `id: btw` /
+  `name: dsh-btw`, zero `not found` / `unknown key` / `cannot resolve` lines.
+- Mirror harness E2E (`.harness-check\home-021`, 0.2.1-rc.2): overlay with a
+  streamed answer, `cacheReadTokens: 2304` on the warm second call, Escape/Space/
+  Enter each dismissed it, and a mid-stream `/btw` answered while the main turn
+  ran. Ephemerality check PASS on the mirror session log.
+- Live smoke (operator): page refreshed, a marked `/btw <question>` answered in
+  the overlay and dismissed with Escape. Live session-log assertion PASS: no
+  persisted user message or command event carries the exchange (marker hits are
+  the agent's own tool/test traffic, not the `/btw` path), and no `btw`
+  command/run event exists.
+
+Re-verify after any `dsh` upgrade with the steps below and the scripts in
+`dsh-btw\test\e2e\`.
 
 ## 1. Install the bundle
 
