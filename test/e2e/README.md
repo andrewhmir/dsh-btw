@@ -88,9 +88,14 @@ node dsh-btw\test\e2e\ephemerality-check.mjs `
 ```
 
 It decodes every `session.v*.jsonl*` file under the home that was written since
-`--since` (concatenated zstd frames, split on the magic) and fails if the marker
-question, a distinguishing answer excerpt, or a `command/run` event named `btw`
-appears. `EPHEMERALITY PASS` is the proof for the strict-parity requirement.
+`--since` (concatenated zstd frames, split on the magic). Classification is by
+event type: the **answer excerpt fails in every event type** (a side answer has
+no legitimate persistence site), while the **question marker fails only in
+`user/message`, `command/run`, or `command/done`** — a question-marker hit in
+agent tool/test traffic is reported as a harness artifact, because the test
+harness injects the marker through a tool call. A `command/run` event named `btw`
+always fails. `EPHEMERALITY PASS` is the proof for the strict-parity
+requirement.
 
 ## 6. Shut down
 

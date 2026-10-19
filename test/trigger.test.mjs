@@ -6,9 +6,9 @@ const session = { sessionId: 'sess-1' };
 const signal = new AbortController().signal;
 
 test('parseBtwLine claims only a leading /btw command line', () => {
-  assert.deepEqual(parseBtwLine('/btw hello there'), { question: 'hello there' });
-  assert.deepEqual(parseBtwLine('  /BTW   spaced   '), { question: 'spaced' });
-  assert.deepEqual(parseBtwLine('/btw'), { question: '' });
+  assert.deepEqual(parseBtwLine('/btw hello there'), { token: '/btw', question: 'hello there' });
+  assert.deepEqual(parseBtwLine('  /BTW   spaced   '), { token: '/BTW', question: 'spaced' });
+  assert.deepEqual(parseBtwLine('/btw'), { token: '/btw', question: '' });
   for (const line of ['/btwx nope', 'foo /btw nope', '/btw\nsecond line', '/ btw x', 'hello']) {
     assert.equal(parseBtwLine(line), undefined, JSON.stringify(line));
   }
@@ -58,4 +58,37 @@ test('the menu row is discoverable and picks to a claim', async () => {
   assert.equal((await source.candidates(session, { query: 'zzz', position: 'leading', drilled: false, signal })).length, 0);
   const pick = source.onPick({ candidate: { name: 'btw' }, session, position: 'leading', via: 'menu', action: 'pick', span: { from: 0, to: 4, rev: 0 } });
   assert.equal(pick.claim.name, 'btw');
+});
+
+test('a typed spelling is preserved in the claim token so args survive case-sensitive argsAfter', async () => {
+  // The harness computes a claim's arguments with a case-sensitive
+  // `argsAfter(draft, claim.token)`; a fixed '/btw ' token would drop the
+  // question for '/BTW ...'. Mirror that logic here.
+  const argsAfter = (draft, token) => (draft.startsWith(token) ? draft.slice(token.length) : '');
+  const submitted = [];
+  const source = createBtwSource({ submitQuestion: (sid, q) => { submitted.push([sid, q]); return { kind: 'success' }; } });
+
+  const upper = await source.matchEnter(session, '/BTW What is up?', signal, { attachments: 0 });
+  assert.equal(upper.claim.token, '/BTW ');
+  assert.equal(argsAfter('/BTW What is up?', upper.claim.token), 'What is up?');
+  assert.equal((await upper.claim.submit(argsAfter('/BTW What is up?', upper.claim.token))).kind, 'success');
+  assert.deepEqual(submitted, [['sess-1', 'What is up?']]);
+
+  const spaced = source.matchSpace(session, '/bTw');
+  assert.equal(spaced.claim.token, '/bTw ');
+  const restored = await source.matchClaim(session, '/BTW', signal);
+  assert.equal(restored.token, '/BTW ');
+});
+
+test('the claim accepts the harness attachment envelope and refuses attachments on every path', async () => {
+  const submitted = [];
+  const claim = makeBtwClaim({ sessionId: 'sess-1', submitQuestion: (sid, q) => { submitted.push(q); return { kind: 'success' }; } });
+  assert.equal(claim.attachments, true);
+  const refused = await claim.submit('question', {}, [{ type: 'image' }]);
+  assert.equal(refused.kind, 'error');
+  assert.match(refused.text, /does not accept attachments/);
+  assert.equal(submitted.length, 0);
+  const ok = await claim.submit('question', {}, []);
+  assert.equal(ok.kind, 'success');
+  assert.deepEqual(submitted, ['question']);
 });

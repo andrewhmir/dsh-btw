@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 
 const root = new URL('../', import.meta.url);
 const pkgPath = new URL('package.json', root);
@@ -80,4 +80,28 @@ test('README documents install, semantics, limits and publishing; MOUNT document
   assert.ok(mount.includes('dsh_andrew'));
   assert.ok(mount.includes('remove_bundle') || mount.includes('Revert'));
   assert.ok(!/sk-[A-Za-z0-9]{20,}/.test(readme + mount), 'no secrets in docs');
+});
+
+test('the published file set can rebuild the client bundle', () => {
+  const p = pkg();
+  assert.ok(p.files.includes('src/client-entry.js'), 'client-entry.js is read by tools/build-client.mjs');
+  assert.ok(p.files.includes('tools/build-client.mjs'), 'the builder ships');
+  assert.ok(p.files.includes('src/**/*.mjs'), 'the client modules ship');
+  const entry = readFileSync(new URL('src/client-entry.js', root), 'utf8');
+  assert.match(entry, /exports\.apply = apply/);
+});
+
+test('secret and machine-path scan covers every shipped source file', () => {
+  const shipped = ['host.js', 'client.js', 'src/client-entry.js'];
+  for (const dir of ['src/client', 'src/host']) {
+    for (const name of readdirSync(new URL(`${dir}/`, root))) {
+      if (name.endsWith('.mjs')) shipped.push(`${dir}/${name}`);
+    }
+  }
+  assert.ok(shipped.length >= 10, `expected the client and host modules in the scan, got ${shipped.length}`);
+  for (const rel of shipped) {
+    const text = readFileSync(new URL(rel, root), 'utf8');
+    assert.ok(!/C:\\Users\\/i.test(text), rel);
+    assert.ok(!/sk-[A-Za-z0-9]{20,}/.test(text), rel);
+  }
 });

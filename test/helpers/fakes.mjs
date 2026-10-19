@@ -5,7 +5,8 @@ import { EventEmitter } from 'node:events';
 /**
  * Minimal IncomingMessage stand-in: emits its body as one data chunk, then end.
  * The default body is a valid, live-session request so tests that are not about
- * validation can call `makeReq()` with no arguments.
+ * validation can call `makeReq()` with no arguments. `destroyed`/`resume` exist
+ * so the 413 path can be asserted to drain instead of resetting the connection.
  * @param {object} [options] - request shape.
  * @returns {EventEmitter} fake request.
  */
@@ -18,8 +19,12 @@ export function makeReq({
   const req = new EventEmitter();
   req.method = method;
   req.url = url;
-  req.socket = { remoteAddress };
-  req.destroy = () => {};
+  req.socket = { remoteAddress, destroyed: false, on: () => {}, removeListener: () => {} };
+  req.destroyed = false;
+  req.destroy = () => {
+    req.destroyed = true;
+  };
+  req.resume = () => {};
   queueMicrotask(() => {
     if (body !== '') req.emit('data', Buffer.from(body, 'utf8'));
     req.emit('end');
@@ -29,37 +34,41 @@ export function makeReq({
 
 /**
  * Minimal ServerResponse stand-in capturing status, headers and body.
+ * An EventEmitter so the route's response-close abort wiring can be driven, and
+ * `writableFinished` so the route can tell a normal finish from a disconnect.
  * @returns {object} fake response with `body()`/`json()` readers.
  */
 export function makeRes() {
-  return {
-    status: 0,
-    headers: undefined,
-    chunks: [],
-    ended: false,
-    flushed: false,
-    writeHead(status, headers) {
-      this.status = status;
-      this.headers = headers;
-    },
-    write(chunk) {
-      this.chunks.push(String(chunk));
-      return true;
-    },
-    end(chunk) {
-      if (chunk !== undefined) this.chunks.push(String(chunk));
-      this.ended = true;
-    },
-    flushHeaders() {
-      this.flushed = true;
-    },
-    body() {
-      return this.chunks.join('');
-    },
-    json() {
-      return JSON.parse(this.body());
-    },
+  const res = new EventEmitter();
+  res.status = 0;
+  res.headers = undefined;
+  res.chunks = [];
+  res.ended = false;
+  res.flushed = false;
+  res.writableFinished = false;
+  res.writeHead = function writeHead(status, headers) {
+    this.status = status;
+    this.headers = headers;
   };
+  res.write = function write(chunk) {
+    this.chunks.push(String(chunk));
+    return true;
+  };
+  res.end = function end(chunk) {
+    if (chunk !== undefined) this.chunks.push(String(chunk));
+    this.ended = true;
+    this.writableFinished = true;
+  };
+  res.flushHeaders = function flushHeaders() {
+    this.flushed = true;
+  };
+  res.body = function body() {
+    return this.chunks.join('');
+  };
+  res.json = function json() {
+    return JSON.parse(this.body());
+  };
+  return res;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { createBtwHost } from '../src/host/route.mjs';
 import { makeReq, makeRes, fakeAgent } from './helpers/fakes.mjs';
 
@@ -23,11 +24,24 @@ function parseFrames(body) {
 
 const headerConfig = { config: { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max' } };
 
+/** Poll until `fn()` is truthy, up to a deadline. */
+async function waitUntil(label, fn, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await fn()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
 test('rejects non-loopback sockets, wrong paths, and non-POST methods', async () => {
   const { host } = hostFor();
   assert.equal((await call(host, makeReq({ remoteAddress: '10.0.0.9' }))).status, 403);
   assert.equal((await call(host, makeReq({ url: '/btw/other' }))).status, 404);
-  assert.equal((await call(host, makeReq({ method: 'GET' }))).status, 405);
+  const method = await call(host, makeReq({ method: 'GET' }));
+  assert.equal(method.status, 405);
+  assert.equal(method.json().error.code, 'METHOD_NOT_ALLOWED');
+  assert.equal(method.headers.allow, 'POST');
 });
 
 test('validates the JSON body, session id, question, and body size', async () => {
@@ -36,7 +50,12 @@ test('validates the JSON body, session id, question, and body size', async () =>
   assert.equal((await call(host, makeReq({ body: JSON.stringify({ sessionId: '', question: 'q' }) }))).status, 400);
   assert.equal((await call(host, makeReq({ body: JSON.stringify({ sessionId: 'sess-1', question: '   ' }) }))).status, 400);
   assert.equal((await call(host, makeReq({ body: JSON.stringify({ sessionId: 'sess-1', question: 'x'.repeat(4001) }) }))).status, 400);
-  assert.equal((await call(host, makeReq({ body: JSON.stringify({ sessionId: 'sess-1', question: 'x'.repeat(33000) }) }))).status, 413);
+  const oversizedReq = makeReq({ body: JSON.stringify({ sessionId: 'sess-1', question: 'x'.repeat(33000) }) });
+  const oversized = await call(host, oversizedReq);
+  assert.equal(oversized.status, 413);
+  assert.equal(oversized.json().error.code, 'TOO_LARGE');
+  // Draining must not reset the connection before the 413 can be written.
+  assert.equal(oversizedReq.destroyed, false);
 });
 
 test('reports a missing live agent and a missing model route as JSON errors', async () => {
@@ -117,23 +136,78 @@ test('a thrown stream error still produces one error frame', async () => {
   assert.equal(frames.at(-1).message, 'boom');
 });
 
-test('closing the request aborts the provider signal; the timeout deadline aborts too', async () => {
+test('closing the response aborts the provider signal; the timeout deadline aborts too', async () => {
   const seen = [];
   const llm = {
     stream: async function* (options) {
       seen.push(options.signal);
-      await new Promise((resolve) => options.signal.addEventListener('abort', resolve));
+      await new Promise((resolve) => options.signal.addEventListener('abort', resolve, { once: true }));
       yield { type: 'finish', reason: { kind: 'aborted', failure: { code: 'ABORTED', message: 'client left' } } };
     },
   };
   const req = makeReq();
   const res = makeRes();
   const pending = hostFor({ agent: fakeAgent({ header: headerConfig }), llm }).host.handleRequest(req, res);
-  await new Promise((r) => setImmediate(r));
-  req.emit('close');
+  await waitUntil('the provider stream to start', () => seen.length > 0);
+  res.emit('close');
   await pending;
   assert.equal(seen[0].aborted, true);
   const timed = hostFor({ agent: fakeAgent({ header: headerConfig }), llm, config: { timeoutMs: 20 } }).host;
   const frames = parseFrames((await call(timed, makeReq())).body());
   assert.equal(frames.at(-1).type, 'error');
+});
+
+test('a real client disconnect aborts the provider call (real node:http socket)', async () => {
+  const seen = [];
+  const llm = {
+    stream: async function* (options) {
+      seen.push(options);
+      await new Promise((resolve) => options.signal.addEventListener('abort', resolve, { once: true }));
+      yield { type: 'finish', reason: { kind: 'aborted', failure: { code: 'ABORTED', message: 'client left' } } };
+    },
+  };
+  const { host } = hostFor({ agent: fakeAgent({ header: headerConfig }), llm, config: { timeoutMs: 8000 } });
+  const server = http.createServer((req, res) => {
+    void host.handleRequest(req, res).catch(() => {});
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const client = http.request({
+      host: '127.0.0.1', port, path: '/btw/ask', method: 'POST',
+      headers: { 'content-type': 'application/json' },
+    });
+    client.on('error', () => {});
+    client.write(JSON.stringify({ sessionId: 'sess-1', question: 'why?' }));
+    client.end();
+    await waitUntil('the provider stream to start', () => seen.length > 0);
+    client.destroy();
+    await waitUntil(
+      'the provider signal to abort after the client destroyed the socket',
+      () => seen[0].signal.aborted === true,
+    );
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('a real oversized body receives HTTP 413 TOO_LARGE instead of a reset', async () => {
+  const { host } = hostFor();
+  const server = http.createServer((req, res) => {
+    void host.handleRequest(req, res).catch(() => {});
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/btw/ask`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'sess-1', question: 'x'.repeat(40000) }),
+    });
+    assert.equal(response.status, 413);
+    assert.equal((await response.json()).error.code, 'TOO_LARGE');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

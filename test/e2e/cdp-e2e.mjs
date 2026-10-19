@@ -298,9 +298,19 @@ async function runFull() {
   if ((first.answer || '').trim().length < 10) throw new Error(`the side answer is empty or too short: ${JSON.stringify(first.answer)}`);
   const answerExcerpt = (first.answer || '').replace(/\s+/g, ' ').trim().slice(0, 60);
 
-  // Second call in the same warm session should reuse the parent request prefix.
+  // Uppercase spelling must survive the harness's case-sensitive argsAfter:
+  // the claim carries the typed token, not a fixed lowercase one.
   await pressEscape();
   await waitForOverlayGone();
+  await submitLine(`/BTW ${questionMarker}-upper What is this conversation about?`);
+  const upper = await waitForSideAnswer(`${questionMarker}-upper`);
+  if (!upper.text.includes(`${questionMarker}-upper`)) {
+    throw new Error('the uppercase /BTW invocation did not carry its question into the overlay');
+  }
+  await pressEscape();
+  await waitForOverlayGone();
+
+  // Second call in the same warm session should reuse the parent request prefix.
   const second = await (async () => {
     await openSideQuestion(`${questionMarker}-cache`);
     return waitForSideAnswer(`${questionMarker}-cache`);
@@ -312,6 +322,7 @@ async function runFull() {
   console.log(JSON.stringify(evidence({
     firstAnswerChars: (first.answer || '').length,
     firstStatus: first.status,
+    upperCaseWorks: true,
     secondStatus: second.status,
     cacheReadTokens,
     answerExcerpt,

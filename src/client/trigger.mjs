@@ -14,6 +14,9 @@ export const BTW_HINT = 'Ask a side question about this conversation — not sav
 /** Must mirror the host route's question cap; the client bundle cannot import host modules. */
 const MAX_QUESTION_CHARS = 4000;
 
+/** Refusal text for attachment-carrying submissions. */
+const ATTACHMENTS_REFUSED = 'The /btw command does not accept attachments.';
+
 /**
  * Parse one complete composer line as the /btw command.
  *
@@ -21,17 +24,21 @@ const MAX_QUESTION_CHARS = 4000;
  * the token (`foo /btw x`), a longer name (`/btwx`), a second line, or the
  * inline trigger position all fall through to ordinary submission.
  *
+ * `token` preserves the typed spelling: the harness computes claim arguments
+ * with a case-sensitive `argsAfter(draft, claim.token)`, so a fixed lowercase
+ * token would drop the question from `/BTW ...`.
+ *
  * @param {string} line - complete composer draft.
- * @returns {{question: string} | undefined} the trimmed question, or undefined when not /btw.
+ * @returns {{token: string, question: string} | undefined} typed token and trimmed question, or undefined when not /btw.
  */
 export function parseBtwLine(line) {
   if (typeof line !== 'string') return undefined;
   // A command line is one line; a pasted block keeps its newlines and submits
   // as ordinary text rather than being silently truncated into a question.
   if (line.includes('\n') || line.includes('\r')) return undefined;
-  const match = /^\/btw(?:\s+([\s\S]*))?$/i.exec(line.trim());
+  const match = /^(\/btw)(?:\s+([\s\S]*))?$/i.exec(line.trim());
   if (match === null) return undefined;
-  return { question: (match[1] ?? '').trim() };
+  return { token: match[1], question: (match[2] ?? '').trim() };
 }
 
 /**
@@ -41,17 +48,27 @@ export function parseBtwLine(line) {
  * to `submitQuestion`, which opens the overlay and starts the host request.
  * No host command RPC is involved.
  *
+ * `attachments: true` makes the harness pass the composer's attachment blocks
+ * to `submit`; the claim then refuses them. Every claim path (Space, menu pick,
+ * restored chip, after a usage error) goes straight to `begin-submit`, so this
+ * check is the only one that covers those paths.
+ *
  * @param {object} input - claim inputs.
  * @param {string} input.sessionId - the session the composer is bound to.
  * @param {(sessionId: string, question: string) => object | Promise<object>} input.submitQuestion - side-question starter.
- * @returns {{name: string, token: string, hint: string, submit: (args: string) => object | Promise<object>}} command claim.
+ * @param {string} [input.typedToken] - the spelling the user typed (defaults to `/btw`).
+ * @returns {{name: string, token: string, hint: string, attachments: true, submit: (args: string, actx?: object, attachments?: unknown[]) => object | Promise<object>}} command claim.
  */
-export function makeBtwClaim({ sessionId, submitQuestion }) {
+export function makeBtwClaim({ sessionId, submitQuestion, typedToken = '/btw' }) {
   return {
     name: 'btw',
-    token: '/btw ',
+    token: `${typedToken} `,
     hint: BTW_HINT,
-    submit(args) {
+    attachments: true,
+    submit(args, actx, attachments) {
+      if (Array.isArray(attachments) && attachments.length > 0) {
+        return { kind: 'error', text: ATTACHMENTS_REFUSED };
+      }
       const question = typeof args === 'string' ? args.trim() : '';
       if (question.length === 0) return { kind: 'error', text: 'Usage: /btw <question>' };
       if (question.length > MAX_QUESTION_CHARS) {
@@ -70,7 +87,8 @@ export function makeBtwClaim({ sessionId, submitQuestion }) {
  * @returns {object} an InputTriggerSource for the composer pipeline.
  */
 export function createBtwSource({ submitQuestion }) {
-  const claimFor = (session) => makeBtwClaim({ sessionId: session.sessionId, submitQuestion });
+  const claimFor = (session, typedToken) =>
+    makeBtwClaim({ sessionId: session.sessionId, submitQuestion, typedToken });
 
   return {
     trigger: '/',
@@ -103,23 +121,23 @@ export function createBtwSource({ submitQuestion }) {
     /**
      * Space after the bare `/btw` token claims it (composer chip).
      * @param {object} session - client session projection.
-     * @param {string} token - the completed leading token.
+     * @param {string} token - the completed leading token, typed spelling.
      * @returns {{claim: object} | undefined} claim outcome.
      */
     matchSpace(session, token) {
       if (typeof token !== 'string' || token.toLowerCase() !== '/btw') return undefined;
-      return { claim: claimFor(session) };
+      return { claim: claimFor(session, token) };
     },
 
     /**
      * Restore a persisted draft chip without acting.
      * @param {object} session - client session projection.
-     * @param {string} token - chip token.
+     * @param {string} token - chip token, typed spelling.
      * @returns {Promise<object | undefined>} the claim, never a submission.
      */
     async matchClaim(session, token) {
       if (typeof token !== 'string' || token.toLowerCase() !== '/btw') return undefined;
-      return claimFor(session);
+      return claimFor(session, token);
     },
 
     /**
@@ -135,9 +153,9 @@ export function createBtwSource({ submitQuestion }) {
       const parsed = parseBtwLine(line);
       if (parsed === undefined) return undefined;
       if ((envelope?.attachments ?? 0) > 0) {
-        throw new Error('The /btw command does not accept attachments.');
+        throw new Error(ATTACHMENTS_REFUSED);
       }
-      return { claim: claimFor(session) };
+      return { claim: claimFor(session, parsed.token) };
     },
   };
 }

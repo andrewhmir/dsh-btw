@@ -12,9 +12,9 @@
     "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
-  "files": ["host.js", "src/**/*.mjs", "client.js", "tools/build-client.mjs",
-            "cordis.patch.yml", "locale/*.json", "icon.svg", "LICENSE",
-            "README.md", "MOUNT.md"],
+  "files": ["host.js", "src/**/*.mjs", "src/client-entry.js", "client.js",
+            "tools/build-client.mjs", "cordis.patch.yml", "locale/*.json",
+            "icon.svg", "LICENSE", "README.md", "MOUNT.md"],
   "icon": "./icon.svg",
   "license": "MIT",
   "engines": { "dsh": ">=0.2.1-rc.2" },

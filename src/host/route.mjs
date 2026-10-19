@@ -20,10 +20,17 @@ export function isLoopback(req) {
   return LOOPBACK.has(address);
 }
 
-/** Send one plain JSON response. @param {object} res @param {number} status @param {object} payload */
-function sendJson(res, status, payload) {
+/**
+ * Send one plain JSON response.
+ * @param {object} res - response.
+ * @param {number} status - HTTP status.
+ * @param {object} payload - JSON body.
+ * @param {object} [extraHeaders] - additional response headers.
+ */
+function sendJson(res, status, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
+    ...extraHeaders,
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': Buffer.byteLength(body),
@@ -31,13 +38,17 @@ function sendJson(res, status, payload) {
   res.end(body);
 }
 
-/** Send one plain JSON error. @param {object} res @param {number} status @param {string} code @param {string} message */
-function sendError(res, status, code, message) {
-  sendJson(res, status, { error: { code, message } });
+/** Send one plain JSON error. @param {object} res @param {number} status @param {string} code @param {string} message @param {object} [extraHeaders] */
+function sendError(res, status, code, message, extraHeaders) {
+  sendJson(res, status, { error: { code, message } }, extraHeaders);
 }
 
 /**
  * Read a capped request body.
+ *
+ * An over-cap body is DRAINED rather than destroyed: destroying the request
+ * resets the connection, so the caller could never receive the 413 JSON.
+ *
  * @param {object} req - in-flight request.
  * @returns {Promise<string>} the UTF-8 body text.
  */
@@ -45,19 +56,35 @@ function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
-    req.on('data', (chunk) => {
+    let settled = false;
+
+    const finish = (settle, value) => {
+      if (settled) return;
+      settled = true;
+      req.removeListener('data', onData);
+      req.removeListener('end', onEnd);
+      req.removeListener('error', onError);
+      settle(value);
+    };
+    const onData = (chunk) => {
+      if (settled) return;
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
         const error = new Error('body too large');
         error.code = 'too_large';
-        req.destroy?.();
-        reject(error);
+        // Keep consuming the rest so the response can be written on this socket.
+        req.resume?.();
+        finish(reject, error);
         return;
       }
       chunks.push(chunk);
-    });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
+    };
+    const onEnd = () => finish(resolve, Buffer.concat(chunks).toString('utf8'));
+    const onError = (error) => finish(reject, error);
+
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
   });
 }
 
@@ -124,8 +151,7 @@ export function createBtwHost({ webServer, agents, llm, logger, config }) {
       return;
     }
     if (req.method !== 'POST') {
-      res.writeHead(405, { allow: 'POST' });
-      res.end();
+      sendError(res, 405, 'METHOD_NOT_ALLOWED', 'POST required', { allow: 'POST' });
       return;
     }
 
@@ -184,8 +210,16 @@ export function createBtwHost({ webServer, agents, llm, logger, config }) {
 
     const started = Date.now();
     const controller = new AbortController();
-    const onClose = () => controller.abort();
-    req.on('close', onClose);
+    // Dismissal is a RESPONSE-socket event, not a request-body event:
+    // `IncomingMessage` emits 'close' as soon as the body has been consumed on
+    // Node 24, which would abort every healthy request. A response 'close'
+    // before `writableFinished` is the client going away mid-stream.
+    const onClose = () => {
+      if (res.writableFinished !== true) controller.abort();
+    };
+    if (typeof res.on === 'function') res.on('close', onClose);
+    const socket = req.socket;
+    if (socket && typeof socket.on === 'function') socket.on('close', onClose);
     const deadline = setTimeout(() => controller.abort(), timeoutMs);
     deadline.unref?.();
 
@@ -235,7 +269,8 @@ export function createBtwHost({ webServer, agents, llm, logger, config }) {
       else sendError(res, 500, 'SNAPSHOT_FAILED', failure.message);
     } finally {
       clearTimeout(deadline);
-      req.removeListener?.('close', onClose);
+      res.removeListener?.('close', onClose);
+      socket?.removeListener?.('close', onClose);
       res.end();
       const cacheReadTokens = usage?.cacheReadTokens;
       logger?.info?.(
