@@ -69,9 +69,10 @@ test('no machine-specific absolute paths or secrets in shipped code', () => {
   }
 });
 
-test('README documents install, semantics, limits and publishing; MOUNT documents this machine', () => {
+test('README documents install, semantics, privacy, limits, compatibility and independence; MOUNT documents this machine', () => {
   const readme = readFileSync(new URL('README.md', root), 'utf8');
-  for (const heading of ['## Install', '## How it works', '## Known limitations', '## Publishing', '## Verify']) {
+  for (const heading of ['## Install', '## How it works', '## Private by design', '## Known limitations',
+    '## Compatibility', '## Verify', '## Development', '## Independence and license']) {
     assert.ok(readme.includes(heading), heading);
   }
   assert.ok(readme.includes('dsh-plugin'), 'GitHub topic instruction');
@@ -81,6 +82,15 @@ test('README documents install, semantics, limits and publishing; MOUNT document
   assert.ok(mount.includes('dsh_andrew'));
   assert.ok(mount.includes('remove_bundle') || mount.includes('Revert'));
   assert.ok(!/sk-[A-Za-z0-9]{20,}/.test(readme + mount), 'no secrets in docs');
+});
+
+test('the npm file set ships every runtime file and no tests', () => {
+  const p = pkg();
+  for (const rel of ['host.js', 'client.js', 'cordis.patch.yml', 'src/**/*.mjs', 'src/client-entry.js',
+    'tools/build-client.mjs', 'locale/*.json', 'icon.svg', 'LICENSE', 'README.md']) {
+    assert.ok(p.files.includes(rel), `missing from files: ${rel}`);
+  }
+  assert.ok(!p.files.some((entry) => entry.includes('test')), 'tests stay out of the published tarball');
 });
 
 test('the published file set can rebuild the client bundle', () => {

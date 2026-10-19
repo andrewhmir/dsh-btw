@@ -1,7 +1,7 @@
-# dsh-btw — ephemeral `/btw` side questions for the DSH Web GUI
+# @andrewhmir/dsh-btw — ephemeral `/btw` side questions for the DSH Web GUI
 
 An **unofficial community plugin** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-(DSH). It adds one slash command to the Web GUI composer:
+(DSH). It adds one gesture to the Web GUI composer:
 
 ```
 /btw how does the compaction checkpoint interact with the surface?
@@ -32,54 +32,48 @@ empty context; `/btw` gets the full conversation context and no tools.
 
 ## Requirements
 
-- DSH `>= 0.2.0-rc.2` with the Web GUI (`dsh web`). Verified on `0.2.0-rc.2`
-  (npm `latest`) and `0.2.1-rc.2` (npm `next`); see `docs/VERIFICATION.md`.
-- Node.js 24 or newer only for the verification scripts; the plugin itself runs
+- DSH `>= 0.2.0-rc.2` with the Web GUI (`dsh web`).
+- Node.js 22 or newer only for the verification scripts; the plugin itself runs
   inside the harness process.
 
 ## Install
 
-1. Install the package as a DSH **bundle** into the profile you run. In the GUI,
-   the agent can do it with the `plugin_manager` tool:
+The package is a DSH **bundle**: it declares `dsh.bundle.patch` and one
+client+host plugin row (`id: btw`). Install it into the profile you run, then
+restart `dsh web`.
 
-   ```
-   plugin_manager install_bundle  target: <absolute path to this directory>
-   ```
+### From a plugin market
 
-   (or `target: @andrewhmir/dsh-btw@0.1.2` once the package is on npm). The package declares
-   `dsh.bundle.patch`, so the install adds it to `dsh.profile.bundles` and links
-   it into the profile.
-2. **Restart `dsh web`.** The running process holds its pre-install module graph;
-   a restart loads the new host half. Restarting ends the current agent session
-   (sessions persist and can be resumed).
-3. Confirm the composition:
+Enable DSH's custom plugin market, add a community index that lists this package
+(the repository carries the **`dsh-plugin`** GitHub topic so indexes can discover
+it), and install `@andrewhmir/dsh-btw` from the Discover tab.
 
-   ```
-   dsh --profile web --dump-config
-   ```
+### With the agent
 
-   Expected: exit code 0 and a row `id: btw` / `name: @andrewhmir/dsh-btw` with no
-   `not found`, `unknown key`, or `cannot resolve` lines.
-4. In the Web GUI, type `/btw hello` in a session and press Enter.
+```
+plugin_manager install_bundle  target: @andrewhmir/dsh-btw@0.1.2
+```
+
+### From a local checkout
+
+```
+plugin_manager install_bundle  target: /absolute/path/to/dsh-btw
+```
+
+### After installing
+
+**Restart `dsh web`.** The running process holds its pre-install module graph;
+a restart loads the new host half. Then confirm the composition:
+
+```
+dsh --profile web --dump-config
+```
+
+Expected: exit code 0 and a row `id: btw` / `name: @andrewhmir/dsh-btw` with no
+`not found`, `unknown key`, or `cannot resolve` lines.
 
 After editing only `client.js`, the harness's client HMR picks the rebuilt file
 up on save; host-half edits need a restart.
-
-## Configure
-
-The plugin row accepts two optional values; both have safe defaults and are read
-without a Config schema:
-
-```yaml
-- insert:
-    - id: btw
-      name: '@andrewhmir/dsh-btw'
-      config:
-        maxTokens: 1200    # completion cap for one side answer (default 1200)
-        timeoutMs: 120000  # hard deadline for one side call (default 120000)
-```
-
-Questions are capped at 4000 characters; the request body is capped at 32 KiB.
 
 ## How it works
 
@@ -109,6 +103,38 @@ Questions are capped at 4000 characters; the request body is capped at 32 KiB.
 - Nothing in this path calls `session.append`, the command registry, the agent
   loop, or the inbox — that is what makes the exchange ephemeral.
 
+## Private by design
+
+The ephemerality is a contract, not a rendering choice:
+
+- the question and answer are never written to the session log, so they are not
+  in the transcript, the token meter's session history, or any export;
+- the host route never touches `session.append`, the command registry, the agent
+  loop, or the inbox;
+- the only durable effect is provider billing for one call.
+
+It is verified against real session logs: `test/e2e/ephemerality-check.mjs`
+decodes every `session.v*.jsonl.zstd` in a test home and fails if the question or
+any part of the answer appears in a persisted event. A control run proves the
+scanner detects text that *is* legitimately persisted. Results for both supported
+harness versions are recorded in [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
+
+## Configure
+
+The plugin row accepts two optional values; both have safe defaults and are read
+without a Config schema:
+
+```yaml
+- insert:
+    - id: btw
+      name: '@andrewhmir/dsh-btw'
+      config:
+        maxTokens: 1200    # completion cap for one side answer (default 1200)
+        timeoutMs: 120000  # hard deadline for one side call (default 120000)
+```
+
+Questions are capped at 4000 characters; the request body is capped at 32 KiB.
+
 ## Known limitations
 
 - **In-flight partial assistant text is not included.** The snapshot reads the
@@ -124,6 +150,20 @@ Questions are capped at 4000 characters; the request body is capped at 32 KiB.
 - **A future host `btw` command would shadow this plugin.** The host catalog is
   adjudicated before the plugin's source; if a future harness version ships a
   host command with the same name, `/btw` would execute that command instead.
+- **Single-shot.** There is no follow-up turn inside the overlay.
+
+## Compatibility
+
+`engines.dsh` declares `>=0.2.0-rc.2`. Both tags were verified on a clean-room
+install containing only the official bundles plus this plugin:
+
+| Harness | Result |
+|---|---|
+| `0.2.0-rc.2` (npm `latest`) | overlay + streamed answer, uppercase `/BTW`, Markdown, Escape/Space/Enter dismissal, warm cache |
+| `0.2.1-rc.2` (npm `next`) | the above, plus mid-stream concurrency (4/4 answers during a tool call) and strict ephemerality |
+
+See [`docs/VERIFICATION.md`](docs/VERIFICATION.md) for the measurements and the
+exact commands.
 
 ## Verify
 
@@ -135,27 +175,37 @@ node tools/build-client.mjs --check
 node --check client.js
 ```
 
-`test/e2e/` additionally contains the mirror-rehearsal, CDP browser-E2E, and
-session-log ephemerality scripts used for release verification (not shipped in
-the published package).
+The clean-room and browser harness lives in `test/e2e/` and is documented there.
+It is not shipped in the published package:
 
-## Publishing
+- `clean-room.ps1` builds a fresh DSH home with only the official bundles plus
+  this plugin, seeds the workspace state, composes, boots, and prints the URL;
+- `first-run.mjs` dismisses the first-run preview notice and proves the composer
+  accepts text;
+- `cdp-e2e.mjs` drives the real GUI over the DevTools protocol (`probe`, `full`,
+  `dismiss-keys`, `mid-stream`);
+- `ephemerality-check.mjs` asserts that no exchange reached a session log.
 
-This is an unofficial community plugin; upstream DSH does not accept external
-pull requests at the moment, so distribution is a standalone package:
+## Development
 
-1. The package is published as **`@andrewhmir/dsh-btw`**. The unscoped npm name
-   `dsh-btw` is taken by an independent community plugin
-   (`github.com/iluluyu/dsh-btw`, v0.0.3), and `@michengai/dsh-btw` is another
-   independent implementation.
-2. The GitHub topic **`dsh-plugin`** makes the repository discoverable by
-   community plugin indexes.
-3. Announcing it in the upstream repository's Discussions is welcome; do not
-   expect a reply.
+```
+node tools/build-client.mjs         # regenerate client.js from src/client/*.mjs
+node tools/build-client.mjs --check # fail when client.js is stale
+node --test "test/*.test.mjs"
+```
 
-This package is an independent implementation of the `/btw` idea. It does not
-reuse code from the existing community packages.
+`client.js` is a generated classic script that registers itself with the
+harness's module loader under the package name. Source modules under `src/client/`
+are plain ESM with relative `.mjs` imports only; the host half lives in `src/host/`
+and is injected with the harness services (`webServer`, `llm`, `agents`).
 
-## License
+## Independence and license
 
-MIT. See `LICENSE`.
+This is an unofficial community plugin, not affiliated with DeepSeek. It is an
+independent implementation of the `/btw` idea and does not reuse code from the
+other community packages with similar names (`dsh-btw@0.0.3` and
+`@michengai/dsh-btw`). Upstream DSH does not accept external pull requests at
+the moment, so distribution is a standalone package; the repository carries the
+`dsh-plugin` topic so community plugin indexes can discover it.
+
+MIT. See [`LICENSE`](LICENSE).

@@ -5,8 +5,8 @@
 // builds third-party client code. Source modules stay separate and unit
 // testable; only this file knows how to flatten them.
 //
-//   node dsh-btw/tools/build-client.mjs          # write client.js
-//   node dsh-btw/tools/build-client.mjs --check  # exit 1 when stale
+//   node tools/build-client.mjs          # write client.js
+//   node tools/build-client.mjs --check  # exit 1 when stale
 //
 // The transform is deliberately small and literal:
 //   * `import ... from './x.mjs'` becomes `const { a, b } = __dsh_btw.x;`
@@ -140,7 +140,7 @@ export function renderBundle() {
   return [
     '// GENERATED FILE - do not edit by hand.',
     '// Assembled from src/client/*.mjs by tools/build-client.mjs.',
-    '// Run `node dsh-btw/tools/build-client.mjs` after changing a source module.',
+    '// Run `node tools/build-client.mjs` after changing a source module.',
     '',
     'window.__ModuleLoader__.load({',
     `  id: "${PLUGIN_ID}",`,
@@ -172,11 +172,11 @@ export function main(argv = process.argv.slice(2)) {
     try {
       current = readFileSync(outFile, 'utf8');
     } catch {
-      console.error('client.js is missing - run: node dsh-btw/tools/build-client.mjs');
+      console.error('client.js is missing - run: node tools/build-client.mjs');
       return 1;
     }
     if (norm(current) !== norm(built)) {
-      console.error('client.js is STALE - run: node dsh-btw/tools/build-client.mjs');
+      console.error('client.js is STALE - run: node tools/build-client.mjs');
       return 1;
     }
     console.log('client.js is up to date');

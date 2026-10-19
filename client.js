@@ -1,6 +1,6 @@
 // GENERATED FILE - do not edit by hand.
 // Assembled from src/client/*.mjs by tools/build-client.mjs.
-// Run `node dsh-btw/tools/build-client.mjs` after changing a source module.
+// Run `node tools/build-client.mjs` after changing a source module.
 
 window.__ModuleLoader__.load({
   id: "@andrewhmir/dsh-btw",

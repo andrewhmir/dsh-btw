@@ -1,5 +1,9 @@
 # Mounting @andrewhmir/dsh-btw in this company profile
 
+> **Example, not required reading.** These are the author's own machine notes
+> (`DSH_HOME=C:\Users\Andrew\.dsh-company`); paths are illustrative. Community
+> installs should follow [`README.md`](README.md).
+
 Machine-specific install notes for the DSH company Web GUI on this box
 (`DSH_HOME=C:\Users\Andrew\.dsh-company`, GUI on <http://127.0.0.1:3081>).
 
