@@ -25,6 +25,15 @@ Machine-specific install notes for the DSH company Web GUI on this box
 Re-verify after any `dsh` upgrade with the steps below and the scripts in
 `dsh-btw\test\e2e\`.
 
+**Post-review fix pass (2026-10-19 01:35):** the fresh-context review found and
+the implementation fixed four defects (dismissal now aborts the provider call,
+uppercase `/BTW` keeps its question, attachment-carrying claims are refused on
+every claim path, and the 413/405 responses match the documented contract). The
+fixed build was re-verified on the mirror (full E2E incl. uppercase, dismiss
+mid-stream, mid-stream concurrency, strict ephemerality PASS; suite 55/55). The
+**live host process loads these host-side corrections on its next restart**; the
+client half hot-swaps from the rebuilt `client.js`.
+
 ## 1. Install the bundle
 
 Use the harness `plugin_manager` tool (the sanctioned route; do not hand-edit the
