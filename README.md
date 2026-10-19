@@ -32,7 +32,8 @@ empty context; `/btw` gets the full conversation context and no tools.
 
 ## Requirements
 
-- DSH `>= 0.2.1-rc.2` with the Web GUI (`dsh web`).
+- DSH `>= 0.2.0-rc.2` with the Web GUI (`dsh web`). Verified on `0.2.0-rc.2`
+  (npm `latest`) and `0.2.1-rc.2` (npm `next`); see `docs/VERIFICATION.md`.
 - Node.js 24 or newer only for the verification scripts; the plugin itself runs
   inside the harness process.
 

@@ -49,6 +49,31 @@ The script also closes the two first-run differences such a home exposes:
 | Unit suite | `node --test "test/*.test.mjs"` | 66/66 pass |
 | Client bundle current | `node tools/build-client.mjs --check` | `client.js is up to date` |
 
+## Results — DSH 0.2.0-rc.2 (npm `latest`)
+
+The floor in `package.json` is whatever this run measured. It is the tag most
+users install, so the plugin is only listed as compatible with `latest` because
+the same assertions pass there.
+
+| | |
+|---|---|
+| Harness | `@deepseek-ai/dsh` **0.2.0-rc.2**, scratch install `.harness-check/prefix-020` |
+| Home | `.harness-check/home-clean-020` (`clean-room.ps1`, created from nothing) |
+| Composed bundles | `@deepseek-ai/dsh-base`, `@deepseek-ai/dsh-web-app`, `@andrewhmir/dsh-btw` |
+| Composed tree | 188 packages, all `@deepseek-ai/*`; zero company plugins; `- id: btw` resolves to `@andrewhmir/dsh-btw` |
+
+| Assertion | Observed |
+|---|---|
+| Composition | exit 0, 1262 lines, zero loader complaints |
+| Host route registered | `GET /btw/ask → 405` |
+| First run unblocked | `{"dialogFound": true, "dialogDismissed": true, "composerAcceptsText": true}` |
+| Side question answers | `probe`: `status: "done"`, real answer rendered in the overlay |
+| Full suite of UI assertions | `firstStatus: "done"`, `upperCaseWorks: true`, `markdownRendered: true`, `secondStatus: "done"`, `cacheReadTokens: 1664` |
+| Dismissal by key | `Escape`, `Space`, `Enter` all `dismissed` |
+
+Result: the measured floor is `engines.dsh: ">=0.2.0-rc.2"`, and `package.json`
+declares exactly that.
+
 ## Ephemerality
 
 The load-bearing property is that a `/btw` exchange never reaches the session

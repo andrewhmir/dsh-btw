@@ -14,7 +14,7 @@ test('manifest declares the @andrewhmir/dsh-btw bundle, client half, engine floo
   assert.equal(p.main, './host.js');
   assert.equal(p.license, 'MIT');
   assert.equal(p.icon, './icon.svg');
-  assert.equal(p.engines.dsh, '>=0.2.1-rc.2');
+  assert.equal(p.engines.dsh, '>=0.2.0-rc.2');
   assert.equal(p.engines.node, '>=22');
   assert.equal(p.dependencies, undefined, 'zero runtime dependencies');
   assert.equal(p.peerDependencies, undefined, 'no peer deps: host imports no harness package');

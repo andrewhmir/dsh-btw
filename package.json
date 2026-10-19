@@ -17,7 +17,7 @@
             "icon.svg", "LICENSE", "README.md", "MOUNT.md"],
   "icon": "./icon.svg",
   "license": "MIT",
-  "engines": { "node": ">=22", "dsh": ">=0.2.1-rc.2" },
+  "engines": { "node": ">=22", "dsh": ">=0.2.0-rc.2" },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

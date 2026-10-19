@@ -71,7 +71,7 @@ plugin_manager  action: install_bundle
 ```
 
 The target is the absolute workspace directory; the package declares
-`dsh.bundle.patch` and `engines.dsh >=0.2.1-rc.2`. This is a danger-full-access
+`dsh.bundle.patch` and `engines.dsh >=0.2.0-rc.2`. This is a danger-full-access
 operation and asks for approval.
 
 Expected result: the bundle is selected, the install reports applied (or
