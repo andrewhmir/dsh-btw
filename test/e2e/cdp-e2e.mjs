@@ -267,7 +267,7 @@ async function runProbe() {
       buttons,
       bodyText: (document.body.innerText || '').replace(/\\s+/g, ' ').slice(0, 400),
       scripts: [...document.scripts].map((s) => s.src).filter(Boolean).slice(0, 10),
-      pluginBundleLoaded: [...document.scripts].some((s) => (s.src || '').includes(`${pluginName}/client.js`)),
+      pluginBundleLoaded: [...document.scripts].some((s) => (s.src || '').includes("${pluginName}/client.js")),
     };
   })()`);
   let sideQuestion = null;
