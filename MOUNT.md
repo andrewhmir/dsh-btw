@@ -25,14 +25,22 @@ Machine-specific install notes for the DSH company Web GUI on this box
 Re-verify after any `dsh` upgrade with the steps below and the scripts in
 `dsh-btw\test\e2e\`.
 
-**Post-review fix pass (2026-10-19 01:35):** the fresh-context review found and
-the implementation fixed four defects (dismissal now aborts the provider call,
-uppercase `/BTW` keeps its question, attachment-carrying claims are refused on
-every claim path, and the 413/405 responses match the documented contract). The
-fixed build was re-verified on the mirror (full E2E incl. uppercase, dismiss
-mid-stream, mid-stream concurrency, strict ephemerality PASS; suite 55/55). The
-**live host process loads these host-side corrections on its next restart**; the
-client half hot-swaps from the rebuilt `client.js`.
+**Post-review fix pass (2026-10-19 01:35, GUI restarted 08:10):** the
+fresh-context review found and the implementation fixed four defects (dismissal
+now aborts the provider call, uppercase `/BTW` keeps its question,
+attachment-carrying claims are refused on every claim path, and the 413/405
+responses match the documented contract). The fixed build was re-verified on the
+mirror (full E2E incl. uppercase, dismiss mid-stream, mid-stream concurrency,
+strict ephemerality PASS; suite 55/55), then the GUI was restarted and the fixed
+host half was confirmed live on port 3081:
+
+- `GET /btw/ask` → `405 {"error":{"code":"METHOD_NOT_ALLOWED","message":"POST required"}}`
+- 40 KB POST body → `413 {"error":{"code":"TOO_LARGE"}}` (the pre-fix build reset the socket)
+- unknown session → `409 NO_LIVE_AGENT`; malformed JSON → `400 BAD_REQUEST`
+- `dsh --profile web --dump-config` exit 0, `btw`/`dsh-btw` row, 0 complaints
+
+The client half hot-swaps from the rebuilt `client.js`; its fixed behavior
+(typed-token uppercase, claim-path refusals) is proven by the mirror E2E.
 
 ## 1. Install the bundle
 
