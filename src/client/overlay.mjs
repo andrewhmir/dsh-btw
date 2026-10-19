@@ -19,10 +19,12 @@ import { buildOverlayView } from './view-model.mjs';
  * @param {object} input - inputs.
  * @param {object} input.React - the browser module table's React.
  * @param {object} input.store - overlay store from createOverlayStore().
+ * @param {Function} [input.MarkdownText] - seeded primitives markdown renderer; plain text fallback when absent.
  * @returns {Function} a React function component.
  */
-export function createOverlayComponent({ React, store }) {
+export function createOverlayComponent({ React, store, MarkdownText }) {
   const h = React.createElement;
+  const renderMarkdown = typeof MarkdownText === 'function';
 
   /** @returns {object|null} the rendered overlay, or null while closed. */
   function BtwOverlay() {
@@ -48,7 +50,9 @@ export function createOverlayComponent({ React, store }) {
       view.status === 'error'
         ? h('span', { className: 'dsh-btw-error' }, view.error ?? 'The side question failed.')
         : view.answer.length > 0
-          ? view.answer
+          ? renderMarkdown
+            ? h(MarkdownText, { text: view.answer })
+            : view.answer
           : view.status === 'streaming'
             ? h('span', { className: 'dsh-btw-thinking' }, 'Thinking…')
             : '';
@@ -84,7 +88,11 @@ export function createOverlayComponent({ React, store }) {
           ),
         ),
         h('div', { className: 'dsh-btw-question' }, view.question),
-        h('div', { className: 'dsh-btw-answer' }, answerBody),
+        h(
+          'div',
+          { className: renderMarkdown ? 'dsh-btw-answer dsh-btw-answer--markdown' : 'dsh-btw-answer' },
+          answerBody,
+        ),
         view.truncationNote === null ? null : h('div', { className: 'dsh-btw-note' }, view.truncationNote),
         h(
           'div',

@@ -198,7 +198,15 @@ export function createBtwHost({ webServer, agents, llm, logger, config }) {
 
     let envelope;
     try {
-      envelope = buildRequestEnvelope({ agent, question, maxTokens });
+      envelope = buildRequestEnvelope({
+        agent,
+        question,
+        maxTokens,
+        onHistoryTrimmed: (count) =>
+          logger?.info?.(
+            `btw: trimmed ${count} message(s) from a mid-turn snapshot so the replayed prefix is provider-valid`,
+          ),
+      });
     } catch (error) {
       if (error?.code === 'NO_MODEL_ROUTE') {
         sendError(res, 409, 'NO_MODEL_ROUTE', error.message);

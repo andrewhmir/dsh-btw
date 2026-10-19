@@ -9,7 +9,7 @@ const pkg = () => JSON.parse(readFileSync(pkgPath, 'utf8'));
 test('manifest declares the dsh-btw bundle, client half, engine floor and MIT license', () => {
   const p = pkg();
   assert.equal(p.name, 'dsh-btw');
-  assert.equal(p.version, '0.1.0');
+  assert.equal(p.version, '0.1.1');
   assert.equal(p.type, 'module');
   assert.equal(p.main, './host.js');
   assert.equal(p.license, 'MIT');

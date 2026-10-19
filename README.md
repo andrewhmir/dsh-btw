@@ -96,8 +96,15 @@ Questions are capped at 4000 characters; the request body is capped at 32 KiB.
   with **no tools, no tool history, and no separate system prompt**. Because the
   message list is the parent request's prefix plus one trailing message, the
   provider's prompt cache is reused.
-- The answer streams back as newline-delimited JSON and renders in a
-  `shell.overlay` panel. Space/Enter/Escape abort the request and close it.
+- The answer streams back as newline-delimited JSON, renders **Markdown** through
+  the shell's shared `MarkdownText` component (plain-text fallback if an older
+  shell does not seed it), and is shown in a `shell.overlay` panel.
+  Space/Enter/Escape abort the request and close it.
+- A snapshot taken mid-turn can end with an assistant tool call whose
+  `tool/result` is not committed yet. The host trims that trailing unresolved
+  step before replaying the history, so `/btw` answers with the conversation as
+  of the last completed tool step instead of the provider rejecting the request
+  ("tool calls need immediate results").
 - Nothing in this path calls `session.append`, the command registry, the agent
   loop, or the inbox — that is what makes the exchange ephemeral.
 

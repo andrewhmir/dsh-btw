@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveConfig, DEFAULT_MAX_TOKENS, DEFAULT_TIMEOUT_MS, MAX_QUESTION_CHARS } from '../src/host/config.mjs';
-import { SIDE_QUESTION_INSTRUCTION, buildSideQuestionMessage, buildRequestEnvelope } from '../src/host/prompt.mjs';
+import { SIDE_QUESTION_INSTRUCTION, buildSideQuestionMessage, buildRequestEnvelope, sanitizeHistory } from '../src/host/prompt.mjs';
 
 const history = Object.freeze([
   Object.freeze({ role: 'system', content: Object.freeze([{ type: 'text', text: 'SYSTEM PROMPT' }]) }),
@@ -62,4 +62,70 @@ test('envelope fails loud when no model route is available', () => {
     () => buildRequestEnvelope({ agent: fakeAgent(), question: 'q', maxTokens: 100 }),
     (error) => error.code === 'NO_MODEL_ROUTE',
   );
+});
+
+// A mid-turn snapshot can end with an assistant tool call whose tool/result
+// event is not committed yet. Appending the side question then produces
+// "DeepSeek Messages tool calls need immediate results" (the adapter's
+// INVALID_REQUEST), so the replayed prefix must be trimmed to a resolved step.
+const call = (id) => ({ type: 'tool-call', id, name: 'pwsh', arguments: '{}' });
+const toolResult = (id) => ({ role: 'tool', toolCallId: id, content: [{ type: 'text', text: 'ok' }] });
+const assistantWith = (...content) => ({ role: 'assistant', content });
+
+test('sanitizeHistory leaves a fully resolved history unchanged', () => {
+  const messages = [
+    { role: 'user', content: [{ type: 'text', text: 'run it' }] },
+    assistantWith(call('c1')),
+    toolResult('c1'),
+    assistantWith({ type: 'text', text: 'done' }),
+  ];
+  const { messages: kept, trimmed } = sanitizeHistory(messages);
+  assert.equal(trimmed, 0);
+  assert.equal(kept.length, messages.length);
+});
+
+test('sanitizeHistory drops a trailing assistant tool call with no result', () => {
+  const messages = [
+    { role: 'user', content: [{ type: 'text', text: 'run it' }] },
+    assistantWith({ type: 'text', text: 'running' }, call('c1')),
+  ];
+  const { messages: kept, trimmed } = sanitizeHistory(messages);
+  assert.equal(trimmed, 1);
+  assert.deepEqual(kept.map((m) => m.role), ['user']);
+});
+
+test('sanitizeHistory drops a partially resolved call batch and its trailing results', () => {
+  const messages = [
+    { role: 'user', content: [{ type: 'text', text: 'run both' }] },
+    assistantWith(call('c1'), call('c2')),
+    toolResult('c1'),
+  ];
+  const { messages: kept, trimmed } = sanitizeHistory(messages);
+  assert.equal(trimmed, 2);
+  assert.deepEqual(kept.map((m) => m.role), ['user']);
+});
+
+test('sanitizeHistory drops orphan tool results', () => {
+  const messages = [
+    { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+    toolResult('missing'),
+  ];
+  const { messages: kept, trimmed } = sanitizeHistory(messages);
+  assert.equal(trimmed, 1);
+  assert.deepEqual(kept.map((m) => m.role), ['user']);
+});
+
+test('the envelope never appends the side question after an unresolved tool call', () => {
+  const agent = fakeAgent({ header: { config: { provider: 'p', model: 'm' } } });
+  agent.session.deriveMessages = () => ([
+    { role: 'user', content: [{ type: 'text', text: 'run it' }] },
+    assistantWith(call('c1')),
+  ]);
+  const env = buildRequestEnvelope({ agent, question: 'q?', maxTokens: 100 });
+  assert.deepEqual(env.messages.map((m) => m.role), ['user', 'user']);
+  assert.equal(env.messages.at(-1).content[0].text.endsWith('q?'), true);
+  const unresolved = env.messages
+    .filter((m) => m.role === 'assistant')
+    .flatMap((m) => m.content.filter((b) => b.type === 'tool-call'));
+  assert.equal(unresolved.length, 0);
 });

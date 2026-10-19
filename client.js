@@ -25,6 +25,10 @@ const OVERLAY_CSS = [
   '.dsh-btw-close:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary,#111)}',
   '.dsh-btw-question{border-left:2px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));padding-left:10px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary,#555);white-space:pre-wrap;overflow-wrap:anywhere}',
   '.dsh-btw-answer{flex:1 1 auto;min-height:60px;overflow-y:auto;overscroll-behavior:contain;font-size:14px;line-height:22px;white-space:pre-wrap;overflow-wrap:anywhere}',
+  '.dsh-btw-answer--markdown{white-space:normal}',
+  '.dsh-btw-answer--markdown>:first-child{margin-top:0}',
+  '.dsh-btw-answer--markdown>:last-child{margin-bottom:0}',
+  '.dsh-btw-answer--markdown pre{max-width:100%;overflow-x:auto}',
   '.dsh-btw-thinking{color:var(--dsw-alias-label-secondary,#555)}',
   '.dsh-btw-error{color:var(--dsw-alias-state-error-primary,#b3261e)}',
   '.dsh-btw-note{font-size:12px;line-height:18px;color:var(--dsw-alias-state-warn-primary,#8a5a00)}',
@@ -530,10 +534,12 @@ const { buildOverlayView } = __dsh_btw.viewModel;
  * @param {object} input - inputs.
  * @param {object} input.React - the browser module table's React.
  * @param {object} input.store - overlay store from createOverlayStore().
+ * @param {Function} [input.MarkdownText] - seeded primitives markdown renderer; plain text fallback when absent.
  * @returns {Function} a React function component.
  */
-function createOverlayComponent({ React, store }) {
+function createOverlayComponent({ React, store, MarkdownText }) {
   const h = React.createElement;
+  const renderMarkdown = typeof MarkdownText === 'function';
 
   /** @returns {object|null} the rendered overlay, or null while closed. */
   function BtwOverlay() {
@@ -559,7 +565,9 @@ function createOverlayComponent({ React, store }) {
       view.status === 'error'
         ? h('span', { className: 'dsh-btw-error' }, view.error ?? 'The side question failed.')
         : view.answer.length > 0
-          ? view.answer
+          ? renderMarkdown
+            ? h(MarkdownText, { text: view.answer })
+            : view.answer
           : view.status === 'streaming'
             ? h('span', { className: 'dsh-btw-thinking' }, 'Thinking…')
             : '';
@@ -595,7 +603,11 @@ function createOverlayComponent({ React, store }) {
           ),
         ),
         h('div', { className: 'dsh-btw-question' }, view.question),
-        h('div', { className: 'dsh-btw-answer' }, answerBody),
+        h(
+          'div',
+          { className: renderMarkdown ? 'dsh-btw-answer dsh-btw-answer--markdown' : 'dsh-btw-answer' },
+          answerBody,
+        ),
         view.truncationNote === null ? null : h('div', { className: 'dsh-btw-note' }, view.truncationNote),
         h(
           'div',
@@ -626,6 +638,15 @@ function createOverlayComponent({ React, store }) {
 // the invocation as successful (the draft clears, the overlay owns the stream).
 
 var React = require('react');
+var primitives = null;
+try {
+  primitives = require('@deepseek-ai/dsh-client-ui-primitives');
+} catch (error) {
+  // The primitives package is seeded by the shipped shell; an older shell that
+  // lacks it degrades to the plain-text answer path.
+  primitives = null;
+}
+var MarkdownText = primitives !== null && typeof primitives.MarkdownText === 'function' ? primitives.MarkdownText : undefined;
 var trigger = __dsh_btw.trigger;
 var storeModule = __dsh_btw.store;
 var stream = __dsh_btw.stream;
@@ -660,7 +681,7 @@ function apply(ctx) {
     slots.inject('shell.overlay', function () {
       return slots.register(
         { name: 'shell.overlay', id: 'btw-overlay', order: 100 },
-        overlay.createOverlayComponent({ React: React, store: store }),
+        overlay.createOverlayComponent({ React: React, store: store, MarkdownText: MarkdownText }),
       );
     });
   }

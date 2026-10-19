@@ -10,6 +10,15 @@
 // the invocation as successful (the draft clears, the overlay owns the stream).
 
 var React = require('react');
+var primitives = null;
+try {
+  primitives = require('@deepseek-ai/dsh-client-ui-primitives');
+} catch (error) {
+  // The primitives package is seeded by the shipped shell; an older shell that
+  // lacks it degrades to the plain-text answer path.
+  primitives = null;
+}
+var MarkdownText = primitives !== null && typeof primitives.MarkdownText === 'function' ? primitives.MarkdownText : undefined;
 var trigger = __dsh_btw.trigger;
 var storeModule = __dsh_btw.store;
 var stream = __dsh_btw.stream;
@@ -44,7 +53,7 @@ function apply(ctx) {
     slots.inject('shell.overlay', function () {
       return slots.register(
         { name: 'shell.overlay', id: 'btw-overlay', order: 100 },
-        overlay.createOverlayComponent({ React: React, store: store }),
+        overlay.createOverlayComponent({ React: React, store: store, MarkdownText: MarkdownText }),
       );
     });
   }

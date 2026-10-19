@@ -40,6 +40,80 @@ export function buildSideQuestionMessage(question) {
 }
 
 /**
+ * Trim a mid-turn snapshot to a provider-valid prefix.
+ *
+ * `deriveMessages()` can end with an assistant message whose tool calls have no
+ * committed `tool/result` yet (the tool is still executing). Appending the side
+ * question makes that call look like it is followed by an unrelated user
+ * message, which the DeepSeek adapter correctly rejects with
+ * "tool calls need immediate results" (INVALID_REQUEST). The safe prefix is the
+ * history up to the first assistant message that owns an unresolved tool call;
+ * everything from there on (including partial result batches and orphan
+ * results) is dropped. The call then simply sees the conversation as of the
+ * last completed tool step.
+ *
+ * @param {Array<object>} messages - model-visible history.
+ * @returns {{messages: Array<object>, trimmed: number}} safe history and dropped message count.
+ */
+export function sanitizeHistory(messages) {
+  const resultIds = new Set();
+  for (const message of messages) {
+    if (message?.role === 'tool' && typeof message.toolCallId === 'string') resultIds.add(message.toolCallId);
+  }
+  const callIds = new Set();
+  for (const message of messages) {
+    if (message?.role !== 'assistant' || !Array.isArray(message.content)) continue;
+    for (const block of message.content) {
+      if (block?.type === 'tool-call' && typeof block.id === 'string') callIds.add(block.id);
+    }
+  }
+
+  // Cut at the first assistant message with a call whose result never appears.
+  let cut = messages.length;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message?.role !== 'assistant' || !Array.isArray(message.content)) continue;
+    const unresolved = message.content.some(
+      (block) => block?.type === 'tool-call' && typeof block.id === 'string' && !resultIds.has(block.id),
+    );
+    if (unresolved) {
+      cut = index;
+      break;
+    }
+  }
+
+  const retainedCallIds = new Set();
+  for (const message of messages.slice(0, cut)) {
+    if (message?.role !== 'assistant' || !Array.isArray(message.content)) continue;
+    for (const block of message.content) {
+      if (block?.type === 'tool-call' && typeof block.id === 'string') retainedCallIds.add(block.id);
+    }
+  }
+  const kept = messages
+    .slice(0, cut)
+    .filter((message) => message?.role !== 'tool' || retainedCallIds.has(message.toolCallId));
+
+  // Drop results whose call lived in the cut tail (they would be orphans).
+  const keptCallIds = new Set();
+  for (const message of kept) {
+    if (message?.role !== 'assistant' || !Array.isArray(message.content)) continue;
+    for (const block of message.content) {
+      if (block?.type === 'tool-call' && typeof block.id === 'string') keptCallIds.add(block.id);
+    }
+  }
+  const finalMessages = kept.filter(
+    (message) => message?.role !== 'tool' || keptCallIds.has(message.toolCallId),
+  );
+  // Also drop historical calls whose results are not in the final prefix (defense
+  // in depth: this is the mirror image of the trailing case and keeps every
+  // retained tool_use immediately answered).
+  return {
+    messages: Object.freeze(finalMessages),
+    trimmed: Math.max(0, messages.length - finalMessages.length),
+  };
+}
+
+/**
  * Build the GenerateOptions envelope for one side question.
  *
  * No `tools`, `toolHistory`, `system`, or `purpose` keys are ever added: the
@@ -49,9 +123,10 @@ export function buildSideQuestionMessage(question) {
  * @param {object} input.agent - live Agent (needs `.session` and `.options`).
  * @param {string} input.question - the trimmed question text.
  * @param {number} input.maxTokens - completion cap for this call.
+ * @param {(trimmed: number) => void} [input.onHistoryTrimmed] - called when a mid-turn snapshot had to be trimmed.
  * @returns {object} the request envelope (without `signal`).
  */
-export function buildRequestEnvelope({ agent, question, maxTokens }) {
+export function buildRequestEnvelope({ agent, question, maxTokens, onHistoryTrimmed }) {
   const session = agent.session;
   const header = typeof session.requestHeader === 'function' ? session.requestHeader() : undefined;
   const route = header?.config ?? agent.options ?? {};
@@ -62,7 +137,9 @@ export function buildRequestEnvelope({ agent, question, maxTokens }) {
     error.code = 'NO_MODEL_ROUTE';
     throw error;
   }
-  const messages = [...session.deriveMessages(), buildSideQuestionMessage(question)];
+  const { messages: history, trimmed } = sanitizeHistory(session.deriveMessages());
+  if (trimmed > 0 && typeof onHistoryTrimmed === 'function') onHistoryTrimmed(trimmed);
+  const messages = [...history, buildSideQuestionMessage(question)];
   Object.freeze(messages);
   return {
     provider,
