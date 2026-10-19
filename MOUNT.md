@@ -42,6 +42,24 @@ host half was confirmed live on port 3081:
 The client half hot-swaps from the rebuilt `client.js`; its fixed behavior
 (typed-token uppercase, claim-path refusals) is proven by the mirror E2E.
 
+**Field-bug fix (v0.1.1, 2026-10-19 08:30, restart pending):** real use exposed
+two defects — a mid-turn `/btw` failed with "DeepSeek Messages tool calls need
+immediate results" (the replayed prefix ended with an assistant tool call whose
+result was not committed; the host now trims to the last resolved tool step),
+and Markdown answers rendered literally (the overlay now uses the seeded
+`MarkdownText` primitive; it is a React forwardRef object, so availability is a
+presence test). Mirror re-verification on the fixed build:
+
+- suite **65/65**; `client.js --check` up to date; pack 21 files, `0.1.1`
+- full CDP E2E: streamed answer, uppercase `/BTW`, **`markdownRendered: true`**,
+  warm `cacheReadTokens: 2304`
+- mid-stream CDP E2E: **4/4 `/btw` attempts inside a 20 s tool window answered
+  `done`** while the main turn ran
+- ephemerality PASS for both runs (no persisted user/command/assistant trace)
+
+The host half (history trimming) needs one GUI restart to load; the client half
+hot-swaps from the rebuilt `client.js`.
+
 ## 1. Install the bundle
 
 Use the harness `plugin_manager` tool (the sanctioned route; do not hand-edit the

@@ -370,51 +370,46 @@ async function runDismissKeys() {
 async function runMidStream() {
   await waitFor('the composer', async () => evaluate(`!!document.querySelector('[contenteditable="true"]')`), { timeoutMs: 120000, intervalMs: 1000 });
   await sleep(3000);
+  await ensureFreshSession();
   await submitLine('Run a command that sleeps for about 20 seconds (on Windows: Start-Sleep -Seconds 20), wait for it to finish, then reply with a short confirmation.');
   const sawRunning = await waitFor('the main turn to start streaming', isMainTurnRunning, { timeoutMs: 30000, intervalMs: 500 });
 
-  // A snapshot taken while the main turn is between an assistant tool call and
-  // its tool result used to make the provider reject the replayed history
-  // ("tool calls need immediate results"). Repeated attempts across the turn
-  // deliberately hit several such windows; at least one must answer cleanly.
+  // Wait until the assistant has certainly committed a tool call whose result is
+  // still pending (the 20 s sleep is executing). This is the exact window that
+  // used to make the provider reject the replayed history with
+  // "tool calls need immediate results".
+  await sleep(4000);
+
   const attempts = [];
   let success = null;
-  const deadline = Date.now() + 120000;
-  while (Date.now() < deadline && success === null) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
     if (!(await isMainTurnRunning())) break;
-    const marker = `${questionMarker}-${attempts.length}`;
-    try {
-      await submitLine(`/btw ${marker} What is happening in this conversation right now?`);
-      const overlay = await waitFor('the /btw overlay', readOverlay, { timeoutMs: 20000 });
-      const settled = await waitFor(
+    const marker = `${questionMarker}-${attempt}`;
+    await submitLine(`/btw ${marker} What is happening in this conversation right now?`);
+    const settled = await (async () => {
+      await waitFor('the /btw overlay', readOverlay, { timeoutMs: 20000 });
+      return waitFor(
         'the side answer to settle',
         async () => {
           const current = await readOverlay();
           if (!current) return null;
-          if (current.status === 'done' || current.status === 'error') return current;
-          return null;
+          return current.status === 'done' || current.status === 'error' ? current : null;
         },
-        { timeoutMs: 90000 },
+        { timeoutMs: 120000 },
       );
-      attempts.push({ attempt: attempts.length, status: settled.status, error: settled.error });
-      await pressEscape();
-      await waitForOverlayGone();
-      if (settled.status === 'done' && (settled.answer || '').trim().length > 5) {
-        success = settled;
-        break;
-      }
-    } catch (error) {
-      attempts.push({ attempt: attempts.length, failed: String(error) });
-      try {
-        await pressEscape();
-        await waitForOverlayGone(5000);
-      } catch {
-        // The next attempt still starts from a clean composer.
-      }
-    }
-    await sleep(1200);
+    })();
+    attempts.push({ attempt, status: settled.status, error: settled.error });
+    await pressEscape();
+    await waitForOverlayGone();
+    if (settled.status === 'done' && (settled.answer || '').trim().length > 5) success = settled;
+    await sleep(1500);
   }
-  if (success === null) throw new Error(`no mid-stream side answer succeeded: ${JSON.stringify(attempts)}`);
+
+  const failures = attempts.filter((attempt) => attempt.status !== 'done');
+  if (failures.length > 0) {
+    throw new Error(`mid-stream side answers failed during the tool window: ${JSON.stringify(failures)}`);
+  }
+  if (success === null) throw new Error(`no mid-stream side answer produced text: ${JSON.stringify(attempts)}`);
 
   await waitFor('the main turn to finish', async () => ((await isMainTurnRunning()) ? null : true), { timeoutMs: 300000, intervalMs: 2000 });
   const overlayStillOpen = (await readOverlay()) !== null;

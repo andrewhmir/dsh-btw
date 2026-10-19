@@ -539,7 +539,8 @@ const { buildOverlayView } = __dsh_btw.viewModel;
  */
 function createOverlayComponent({ React, store, MarkdownText }) {
   const h = React.createElement;
-  const renderMarkdown = typeof MarkdownText === 'function';
+  // React component types can be functions or forwardRef/memo objects.
+  const renderMarkdown = MarkdownText !== undefined && MarkdownText !== null;
 
   /** @returns {object|null} the rendered overlay, or null while closed. */
   function BtwOverlay() {
@@ -639,14 +640,28 @@ function createOverlayComponent({ React, store, MarkdownText }) {
 
 var React = require('react');
 var primitives = null;
+var primitivesError = null;
 try {
   primitives = require('@deepseek-ai/dsh-client-ui-primitives');
 } catch (error) {
   // The primitives package is seeded by the shipped shell; an older shell that
   // lacks it degrades to the plain-text answer path.
   primitives = null;
+  primitivesError = String((error && error.message) || error);
 }
-var MarkdownText = primitives !== null && typeof primitives.MarkdownText === 'function' ? primitives.MarkdownText : undefined;
+// MarkdownText may be a plain function component or a forwardRef/memo object,
+// so presence (not `typeof === 'function'`) is the availability test.
+var MarkdownText = primitives !== null && primitives.MarkdownText !== undefined && primitives.MarkdownText !== null ? primitives.MarkdownText : undefined;
+try {
+  window.__DSH_BTW_DIAG__ = {
+    primitives: primitives !== null,
+    primitiveKeys: primitives === null ? [] : Object.keys(primitives).filter(function (key) { return key === 'MarkdownText'; }),
+    markdownText: typeof MarkdownText,
+    primitivesError: primitivesError,
+  };
+} catch (error) {
+  // Diagnostics must never break the plugin.
+}
 var trigger = __dsh_btw.trigger;
 var storeModule = __dsh_btw.store;
 var stream = __dsh_btw.stream;

@@ -24,7 +24,8 @@ import { buildOverlayView } from './view-model.mjs';
  */
 export function createOverlayComponent({ React, store, MarkdownText }) {
   const h = React.createElement;
-  const renderMarkdown = typeof MarkdownText === 'function';
+  // React component types can be functions or forwardRef/memo objects.
+  const renderMarkdown = MarkdownText !== undefined && MarkdownText !== null;
 
   /** @returns {object|null} the rendered overlay, or null while closed. */
   function BtwOverlay() {
