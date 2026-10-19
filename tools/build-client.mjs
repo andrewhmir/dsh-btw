@@ -23,7 +23,7 @@ const root = path.resolve(here, '..');
 const outFile = path.join(root, 'client.js');
 
 /** The plugin id the module loader registers; must equal the package name. */
-export const PLUGIN_ID = 'dsh-btw';
+export const PLUGIN_ID = '@andrewhmir/dsh-btw';
 
 /**
  * Modules that belong in the browser bundle, in evaluation order.

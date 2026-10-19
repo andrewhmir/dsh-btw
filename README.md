@@ -45,7 +45,7 @@ empty context; `/btw` gets the full conversation context and no tools.
    plugin_manager install_bundle  target: <absolute path to this directory>
    ```
 
-   (or install the published package name once it exists). The package declares
+   (or `target: @andrewhmir/dsh-btw@0.1.2` once the package is on npm). The package declares
    `dsh.bundle.patch`, so the install adds it to `dsh.profile.bundles` and links
    it into the profile.
 2. **Restart `dsh web`.** The running process holds its pre-install module graph;
@@ -57,7 +57,7 @@ empty context; `/btw` gets the full conversation context and no tools.
    dsh --profile web --dump-config
    ```
 
-   Expected: exit code 0 and a row `id: btw` / `name: dsh-btw` with no
+   Expected: exit code 0 and a row `id: btw` / `name: @andrewhmir/dsh-btw` with no
    `not found`, `unknown key`, or `cannot resolve` lines.
 4. In the Web GUI, type `/btw hello` in a session and press Enter.
 
@@ -72,7 +72,7 @@ without a Config schema:
 ```yaml
 - insert:
     - id: btw
-      name: dsh-btw
+      name: '@andrewhmir/dsh-btw'
       config:
         maxTokens: 1200    # completion cap for one side answer (default 1200)
         timeoutMs: 120000  # hard deadline for one side call (default 120000)
@@ -143,20 +143,17 @@ the published package).
 This is an unofficial community plugin; upstream DSH does not accept external
 pull requests at the moment, so distribution is a standalone package:
 
-1. Create a public GitHub repository for this directory and push it.
-2. Add the GitHub topic **`dsh-plugin`** so the plugin is discoverable.
-3. **The npm name `dsh-btw` is already taken** (by an independent community
-   plugin implementing a similar idea, `github.com/iluluyu/dsh-btw`, v0.0.3).
-   Do not publish unscoped. Publish under a scope instead (for example
-   `@your-scope/dsh-btw`, which changes the package `name` and therefore the
-   patch row `name` and the installed row id after a rename), or pick a
-   different unscoped name. The DSH plugin identity used by the local/bundle
-   install is `dsh-btw`; publishing is optional and does not affect it.
-4. Announcing it in the upstream repository's Discussions is welcome; do not
+1. The package is published as **`@andrewhmir/dsh-btw`**. The unscoped npm name
+   `dsh-btw` is taken by an independent community plugin
+   (`github.com/iluluyu/dsh-btw`, v0.0.3), and `@michengai/dsh-btw` is another
+   independent implementation.
+2. The GitHub topic **`dsh-plugin`** makes the repository discoverable by
+   community plugin indexes.
+3. Announcing it in the upstream repository's Discussions is welcome; do not
    expect a reply.
 
 This package is an independent implementation of the `/btw` idea. It does not
-reuse code from the existing community package of the same name.
+reuse code from the existing community packages.
 
 ## License
 

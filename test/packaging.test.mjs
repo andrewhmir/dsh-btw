@@ -6,15 +6,16 @@ const root = new URL('../', import.meta.url);
 const pkgPath = new URL('package.json', root);
 const pkg = () => JSON.parse(readFileSync(pkgPath, 'utf8'));
 
-test('manifest declares the dsh-btw bundle, client half, engine floor and MIT license', () => {
+test('manifest declares the @andrewhmir/dsh-btw bundle, client half, engine floor and MIT license', () => {
   const p = pkg();
-  assert.equal(p.name, 'dsh-btw');
-  assert.equal(p.version, '0.1.1');
+  assert.equal(p.name, '@andrewhmir/dsh-btw');
+  assert.equal(p.version, '0.1.2');
   assert.equal(p.type, 'module');
   assert.equal(p.main, './host.js');
   assert.equal(p.license, 'MIT');
   assert.equal(p.icon, './icon.svg');
   assert.equal(p.engines.dsh, '>=0.2.1-rc.2');
+  assert.equal(p.engines.node, '>=22');
   assert.equal(p.dependencies, undefined, 'zero runtime dependencies');
   assert.equal(p.peerDependencies, undefined, 'no peer deps: host imports no harness package');
   assert.equal(p.dsh.bundle.patch, './cordis.patch.yml');
@@ -44,7 +45,7 @@ test('patch inserts exactly one self-named row', () => {
   const patch = readFileSync(new URL('cordis.patch.yml', root), 'utf8');
   assert.match(patch, /^- insert:/m);
   assert.equal((patch.match(/- id: btw$/gm) ?? []).length, 1);
-  assert.equal((patch.match(/name: dsh-btw$/gm) ?? []).length, 1);
+  assert.equal((patch.match(/name: '@andrewhmir\/dsh-btw'$/gm) ?? []).length, 1);
 });
 
 test('locale metadata is complete in en and zh', () => {

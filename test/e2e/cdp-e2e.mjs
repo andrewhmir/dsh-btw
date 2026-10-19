@@ -15,6 +15,12 @@
 //
 // Exit 0 = evidence printed to stdout; non-zero = the assertion failed.
 
+import { readFileSync } from 'node:fs';
+
+// The client bundle is served under the package name; read it so a rename does
+// not drift away from the probe.
+const pluginName = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).name;
+
 const argv = process.argv.slice(2);
 const arg = (name, fallback) => {
   const index = argv.indexOf(`--${name}`);
@@ -261,7 +267,7 @@ async function runProbe() {
       buttons,
       bodyText: (document.body.innerText || '').replace(/\\s+/g, ' ').slice(0, 400),
       scripts: [...document.scripts].map((s) => s.src).filter(Boolean).slice(0, 10),
-      pluginBundleLoaded: [...document.scripts].some((s) => (s.src || '').includes('dsh-btw/client.js')),
+      pluginBundleLoaded: [...document.scripts].some((s) => (s.src || '').includes(`${pluginName}/client.js`)),
     };
   })()`);
   let sideQuestion = null;

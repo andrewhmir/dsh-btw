@@ -11,10 +11,10 @@ test('renderBundle is deterministic and matches the committed client.js', () => 
   assert.equal(norm(onDisk), norm(built));
 });
 
-test('the envelope registers id dsh-btw with a one-argument factory returning exports', () => {
+test('the envelope registers id @andrewhmir/dsh-btw with a one-argument factory returning exports', () => {
   const built = renderBundle();
   assert.match(built, /window\.__ModuleLoader__\.load\(/);
-  assert.match(built, /id: "dsh-btw"/);
+  assert.match(built, /id: "@andrewhmir\/dsh-btw"/);
   assert.match(built, /factory: function \(require\)/);
   assert.match(built, /return exports;/);
   assert.ok(!/^import\s/m.test(built), 'bundled output must not contain ESM imports');

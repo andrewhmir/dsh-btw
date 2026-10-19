@@ -62,7 +62,7 @@ function find(node, predicate) {
 
 test('bundle registers a plugin that wires the slash source and the overlay seat', () => {
   const registration = loadBundle(async () => new Response(''));
-  assert.equal(registration.id, 'dsh-btw');
+  assert.equal(registration.id, '@andrewhmir/dsh-btw');
   assert.equal(registration.factory.length, 1);
   const react = makeFakeReact();
   const plugin = registration.factory(makeRequire(react, {}));

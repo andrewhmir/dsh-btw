@@ -1,4 +1,4 @@
-# Mounting dsh-btw in this company profile
+# Mounting @andrewhmir/dsh-btw in this company profile
 
 Machine-specific install notes for the DSH company Web GUI on this box
 (`DSH_HOME=C:\Users\Andrew\.dsh-company`, GUI on <http://127.0.0.1:3081>).
@@ -7,11 +7,11 @@ Machine-specific install notes for the DSH company Web GUI on this box
 
 - `plugin_manager install_bundle` on the absolute workspace directory reported
   `application: applied`, `warnings: []`, and linked
-  `dsh-btw: link:C:/Users/Andrew/Desktop/dsh_andrew/dsh-btw`; the bundle is in
+  `@andrewhmir/dsh-btw: link:C:/Users/Andrew/Desktop/dsh_andrew/dsh-btw`; the bundle is in
   `dsh.profile.bundles`. **No restart was needed** — the host route was live
   immediately (`GET /btw/ask` → 405 on the live port).
 - Live compose: `dsh --profile web --dump-config` exit 0, row `id: btw` /
-  `name: dsh-btw`, zero `not found` / `unknown key` / `cannot resolve` lines.
+  `name: @andrewhmir/dsh-btw`, zero `not found` / `unknown key` / `cannot resolve` lines.
 - Mirror harness E2E (`.harness-check\home-021`, 0.2.1-rc.2): overlay with a
   streamed answer, `cacheReadTokens: 2304` on the warm second call, Escape/Space/
   Enter each dismissed it, and a mid-stream `/btw` answered while the main turn
@@ -37,7 +37,7 @@ host half was confirmed live on port 3081:
 - `GET /btw/ask` → `405 {"error":{"code":"METHOD_NOT_ALLOWED","message":"POST required"}}`
 - 40 KB POST body → `413 {"error":{"code":"TOO_LARGE"}}` (the pre-fix build reset the socket)
 - unknown session → `409 NO_LIVE_AGENT`; malformed JSON → `400 BAD_REQUEST`
-- `dsh --profile web --dump-config` exit 0, `btw`/`dsh-btw` row, 0 complaints
+- `dsh --profile web --dump-config` exit 0, `btw`/`@andrewhmir/dsh-btw` row, 0 complaints
 
 The client half hot-swaps from the rebuilt `client.js`; its fixed behavior
 (typed-token uppercase, claim-path refusals) is proven by the mirror E2E.
@@ -50,7 +50,7 @@ and Markdown answers rendered literally (the overlay now uses the seeded
 `MarkdownText` primitive; it is a React forwardRef object, so availability is a
 presence test). Mirror re-verification on the fixed build:
 
-- suite **65/65**; `client.js --check` up to date; pack 21 files, `0.1.1`
+- suite **65/65**; `client.js --check` up to date; pack 21 files, `0.1.2`
 - full CDP E2E: streamed answer, uppercase `/BTW`, **`markdownRendered: true`**,
   warm `cacheReadTokens: 2304`
 - mid-stream CDP E2E: **4/4 `/btw` attempts inside a 20 s tool window answered
@@ -76,7 +76,7 @@ operation and asks for approval.
 
 Expected result: the bundle is selected, the install reports applied (or
 `restart-required`), and the profile's dependency list gains
-`"dsh-btw": "link:C:/Users/Andrew/Desktop/dsh_andrew/dsh-btw"`.
+`"@andrewhmir/dsh-btw": "link:C:/Users/Andrew/Desktop/dsh_andrew/dsh-btw"`.
 
 ## 2. Restart the Web GUI
 
@@ -89,11 +89,11 @@ session is persisted and can be resumed after the restart.
 
 ```powershell
 dsh --profile web --dump-config > .harness-check\dump-btw-live.txt 2> .harness-check\dump-btw-live.err.txt
-Select-String -Path .harness-check\dump-btw-live.txt -Pattern 'id: btw','name: dsh-btw'
+Select-String -Path .harness-check\dump-btw-live.txt -Pattern 'id: btw','name: @andrewhmir/dsh-btw'
 Select-String -Path .harness-check\dump-btw-live.txt -Pattern 'not found','unknown key','cannot resolve','did not activate' -SimpleMatch
 ```
 
-Expected: exit code 0, the `btw` row resolves to `dsh-btw`, and the complaint
+Expected: exit code 0, the `btw` row resolves to `@andrewhmir/dsh-btw`, and the complaint
 scan is empty.
 
 ## 4. Verify the capability
@@ -123,13 +123,13 @@ node dsh-btw\test\e2e\ephemerality-check.mjs --home C:\Users\Andrew\.dsh-company
 Preferred (the harness owns profile state):
 
 ```
-plugin_manager  action: remove_bundle  target: dsh-btw
+plugin_manager  action: remove_bundle  target: @andrewhmir/dsh-btw
 ```
 
-Then restart `dsh web`. If the tool is unavailable, remove `"dsh-btw"` from
+Then restart `dsh web`. If the tool is unavailable, remove `"@andrewhmir/dsh-btw"` from
 `dsh.profile.bundles` and the `link:` dependency in
 `C:\Users\Andrew\.dsh-company\profiles\web\package.json`, delete the
-`node_modules\dsh-btw` link, and restart.
+`node_modules\@andrewhmir\dsh-btw` link, and restart.
 
 Nothing under the harness install
 (`C:\Users\Andrew\AppData\Roaming\npm\node_modules\@deepseek-ai\dsh`) is

@@ -3,7 +3,7 @@
 // Run `node dsh-btw/tools/build-client.mjs` after changing a source module.
 
 window.__ModuleLoader__.load({
-  id: "dsh-btw",
+  id: "@andrewhmir/dsh-btw",
   // The loader calls the factory with ONE argument and takes its RETURN VALUE
   // as the module exports, so the factory returns the exports object.
   factory: function (require) {

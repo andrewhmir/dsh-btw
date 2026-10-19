@@ -1,5 +1,6 @@
-# dsh-btw bundle: one client+host plugin row. No host command is registered on
-# purpose - /btw is claimed client-side so nothing reaches the session log.
+# @andrewhmir/dsh-btw bundle: one client+host plugin row. No host command is
+# registered on purpose - /btw is claimed client-side so nothing reaches the
+# session log.
 - insert:
     - id: btw
-      name: dsh-btw
+      name: '@andrewhmir/dsh-btw'

@@ -1,6 +1,6 @@
 {
-  "name": "dsh-btw",
-  "version": "0.1.1",
+  "name": "@andrewhmir/dsh-btw",
+  "version": "0.1.2",
   "description": "Ephemeral /btw side questions for the DeepSeek Harness Web GUI.",
   "type": "module",
   "main": "./host.js",
@@ -17,7 +17,7 @@
             "icon.svg", "LICENSE", "README.md", "MOUNT.md"],
   "icon": "./icon.svg",
   "license": "MIT",
-  "engines": { "dsh": ">=0.2.1-rc.2" },
+  "engines": { "node": ">=22", "dsh": ">=0.2.1-rc.2" },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
