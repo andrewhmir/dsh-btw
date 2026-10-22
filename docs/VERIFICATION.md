@@ -104,6 +104,16 @@ and the unit suite stayed green because nothing parsed the E2E scripts. Fixed in
 `2c8f062`, with `test/e2e-syntax.test.mjs` added so the suite now `node --check`s
 every script under `test/e2e/`.
 
+## Release artifacts
+
+| Artifact | Value |
+|---|---|
+| Repository | <https://github.com/andrewhmir/dsh-btw> (public, MIT, default branch `main`) |
+| Published commit | `b48894f` — 25 commits, 46 files, package at repository root |
+| Topics | `dsh-plugin`, `deepseek-harness`, `dsh`, `side-questions` |
+| CI | GitHub Actions `CI` on `b48894f`: **success** (bundle current, `node --check client.js`, 67/67 tests, `npm pack --dry-run`) |
+| npm package | not yet published at the time this section was written — see the npm section below |
+
 ## How to reproduce
 
 ```powershell
