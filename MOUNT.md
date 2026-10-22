@@ -11,7 +11,7 @@ Machine-specific install notes for the DSH company Web GUI on this box
 
 - `plugin_manager install_bundle` on the absolute workspace directory reported
   `application: applied`, `warnings: []`, and linked
-  `@andrewhmir/dsh-btw: link:C:/Users/Andrew/Desktop/dsh_andrew/dsh-btw`; the bundle is in
+  `@andrewhmir/dsh-btw: link:C:/Users/Andrew/Desktop/dsh_plugins/dsh-btw`; the bundle is in
   `dsh.profile.bundles`. **No restart was needed** — the host route was live
   immediately (`GET /btw/ask` → 405 on the live port).
 - Live compose: `dsh --profile web --dump-config` exit 0, row `id: btw` /
@@ -71,7 +71,7 @@ profile's `package.json` or `cordis.patch.yml`):
 
 ```
 plugin_manager  action: install_bundle
-                target: C:\Users\Andrew\Desktop\dsh_andrew\dsh-btw
+                target: C:\Users\Andrew\Desktop\dsh_plugins\dsh-btw
 ```
 
 The target is the absolute workspace directory; the package declares
@@ -80,7 +80,7 @@ operation and asks for approval.
 
 Expected result: the bundle is selected, the install reports applied (or
 `restart-required`), and the profile's dependency list gains
-`"@andrewhmir/dsh-btw": "link:C:/Users/Andrew/Desktop/dsh_andrew/dsh-btw"`.
+`"@andrewhmir/dsh-btw": "link:C:/Users/Andrew/Desktop/dsh_plugins/dsh-btw"`.
 
 ## 2. Restart the Web GUI
 

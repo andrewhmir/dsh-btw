@@ -79,7 +79,7 @@ test('README documents install, semantics, privacy, limits, compatibility and in
   assert.ok(readme.includes('ephemeral') || readme.includes('not saved'), 'ephemerality claim');
   const mount = readFileSync(new URL('MOUNT.md', root), 'utf8');
   assert.ok(mount.includes('install_bundle'));
-  assert.ok(mount.includes('dsh_andrew'));
+  assert.ok(mount.includes('dsh_plugins'));
   assert.ok(mount.includes('remove_bundle') || mount.includes('Revert'));
   assert.ok(!/sk-[A-Za-z0-9]{20,}/.test(readme + mount), 'no secrets in docs');
 });
