@@ -64,6 +64,31 @@ presence test). Mirror re-verification on the fixed build:
 The host half (history trimming) needs one GUI restart to load; the client half
 hot-swaps from the rebuilt `client.js`.
 
+## 0.2.0 — non-modal card + truncation fix (2026-10-22)
+
+What changed for this machine:
+
+- the answer no longer renders as a full-screen modal; it is a floating card in
+  the chat frame, so the composer and the conversation stay usable while it
+  streams. Dismissal is the × button, or Escape while the card has focus
+  (Space/Enter no longer dismiss);
+- `maxTokens` now defaults to 8192 and is capped by the session's own output cap,
+  a truncated answer is continued automatically, and a budget spent entirely on
+  thinking retries once with thinking off;
+- aborts are a stall watchdog (no chunk for 60 s) plus a 10 min ceiling; they
+  keep the partial text and report `STALLED` / `DEADLINE` instead of dropping it.
+
+Rollout: the client half hot-swaps from the rebuilt `client.js`; the host half
+(budget, continuation, watchdogs) needs one `dsh web` restart. If this profile's
+row config carries an old `maxTokens`/`timeoutMs` override, re-read
+[`README.md`](README.md): `timeoutMs` is now the 10 min ceiling alias, and a
+small `maxTokens` re-introduces the truncation.
+
+Verification for 0.2.0 is the unit suite plus `client.js --check` in this
+workspace. The browser suite must be re-run unconfined
+(see `test/e2e/README.md`); the card contract changed, so the old
+Escape/Space/Enter evidence no longer applies.
+
 ## 1. Install the bundle
 
 Use the harness `plugin_manager` tool (the sanctioned route; do not hand-edit the
@@ -102,8 +127,9 @@ scan is empty.
 
 ## 4. Verify the capability
 
-Smoke test in the real GUI: open a session, type `/btw hello` + Enter. The
-overlay should appear and stream an answer; Escape/Space/Enter should close it.
+Smoke test in the real GUI: open a session, type `/btw hello` + Enter. The card
+should appear and stream an answer; the × button (or Escape while the card is
+focused) should close it, and the composer must stay usable while it streams.
 
 Full verification (mirror rehearsal, browser E2E, ephemerality assertion) is
 documented in `dsh-btw\test\e2e\README.md`. The live E2E and the ephemerality

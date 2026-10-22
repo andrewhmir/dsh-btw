@@ -2,9 +2,14 @@
 //
 // The host route answers POST /btw/ask with newline-delimited JSON frames:
 //   {"type":"delta","text":"…"}
-//   {"type":"done","finish":"stop","usage":{…}}
+//   {"type":"progress","reasoningChars":N}
+//   {"type":"done","finish":"stop"|"max-tokens","usage":{…},"continuations":N}
 //   {"type":"error","code":"…","message":"…"}
 // Chunks may split a line anywhere, so the reader buffers partial lines.
+//
+// The reader also guarantees a settlement: a body that ends without a done or
+// error frame (server died, proxy cut the socket) is reported as STREAM_ENDED
+// instead of leaving the overlay on "Thinking…" forever.
 //
 // Pure module: no DOM, no React, no harness imports.
 
@@ -12,7 +17,7 @@
  * Read one NDJSON response body and dispatch its frames.
  *
  * @param {ReadableStream<Uint8Array>} body - the response body stream.
- * @param {{onDelta: Function, onDone: Function, onError: Function}} handlers - frame handlers.
+ * @param {{onDelta: Function, onDone: Function, onError: Function, onProgress?: Function}} handlers - frame handlers.
  * @returns {Promise<void>} resolves when the stream ends or fails safely.
  */
 export async function readNdjsonStream(body, handlers) {
@@ -25,26 +30,37 @@ export async function readNdjsonStream(body, handlers) {
   const decoder = new TextDecoder();
   let buffer = '';
   let failed = false;
+  let settled = false;
+
+  /** Report one failure at most once. @param {object} error - code + message. */
+  const fail = (error) => {
+    if (failed || settled) return;
+    failed = true;
+    settled = true;
+    handlers.onError(error);
+  };
 
   const dispatch = (line) => {
-    if (failed || line.trim() === '') return;
+    if (settled || failed || line.trim() === '') return;
     let frame;
     try {
       frame = JSON.parse(line);
     } catch {
-      failed = true;
-      handlers.onError({ code: 'CORRUPT_STREAM', message: 'The side answer stream was corrupted.' });
+      fail({ code: 'CORRUPT_STREAM', message: 'The side answer stream was corrupted.' });
       return;
     }
     if (frame?.type === 'delta') {
       handlers.onDelta(typeof frame.text === 'string' ? frame.text : '');
     } else if (frame?.type === 'done') {
+      settled = true;
       handlers.onDone(frame);
     } else if (frame?.type === 'error') {
-      handlers.onError({
+      fail({
         code: typeof frame.code === 'string' ? frame.code : 'ERROR',
         message: typeof frame.message === 'string' ? frame.message : 'The side question failed.',
       });
+    } else if (frame?.type === 'progress' && typeof handlers.onProgress === 'function') {
+      handlers.onProgress(frame);
     }
     // Unknown frame types are ignored so a future host can add metadata.
   };
@@ -71,13 +87,14 @@ export async function readNdjsonStream(body, handlers) {
     }
     buffer += decoder.decode();
     if (buffer.trim() !== '') dispatch(buffer.replace(/\r$/, ''));
-  } catch (error) {
-    if (!failed) {
-      handlers.onError({
-        code: typeof error?.code === 'string' ? error.code : 'STREAM_ERROR',
-        message: error?.message ?? String(error),
-      });
+    if (!settled && !failed) {
+      fail({ code: 'STREAM_ENDED', message: 'The side answer stream ended before it finished.' });
     }
+  } catch (error) {
+    fail({
+      code: typeof error?.code === 'string' ? error.code : 'STREAM_ERROR',
+      message: error?.message ?? String(error),
+    });
   }
 }
 
@@ -90,7 +107,7 @@ export async function readNdjsonStream(body, handlers) {
  * @param {string} input.question - the trimmed question.
  * @param {AbortSignal} [input.signal] - dismissal/abort signal.
  * @param {Function} [input.fetchImpl] - fetch override for tests.
- * @param {{onDelta: Function, onDone: Function, onError: Function}} input.handlers - frame handlers.
+ * @param {{onDelta: Function, onDone: Function, onError: Function, onProgress?: Function}} input.handlers - frame handlers.
  * @returns {Promise<void>} resolves when settled; never rejects for expected failures.
  */
 export async function askBtw({ url, sessionId, question, signal, fetchImpl, handlers }) {

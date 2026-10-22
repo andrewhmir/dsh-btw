@@ -1,12 +1,13 @@
-// The /btw overlay: a dismissible, centred panel over the whole app frame.
+// The /btw panel: a dismissible, NON-MODAL floating card in the app frame.
 //
 // Registered as a `shell.overlay` list entry (see client-entry.js). While
-// closed it renders null, so the additive slot stays click-through. While open:
-//   * Escape, Space, and Enter dismiss it from a capture-phase listener;
-//   * a backdrop click or the close button dismisses it;
-//   * `role="dialog" aria-modal="true"` + `data-shortcut-modal="btw"` tell the
-//     shortcuts service this is the modal owner, so background shortcuts and
-//     the conversation's double-Escape stop do not react.
+// closed it renders null. While open:
+//   * the card floats above the chat (bottom-right) and the rest of the app
+//     stays fully interactive: no backdrop, no focus trap, no global keys;
+//   * the × button closes it, and Escape closes it while the card has focus;
+//   * role="region" (never dialog/aria-modal) keeps the shortcuts service from
+//     treating it as the modal owner, so composer and conversation shortcuts
+//     keep working while an answer streams.
 //
 // The root also exposes `data-btw-status` and `data-btw-cache-read-tokens` as
 // verification hooks for the E2E script; they are not shown to the user.
@@ -15,7 +16,7 @@ import { OVERLAY_CSS } from './styles.mjs';
 import { buildOverlayView } from './view-model.mjs';
 
 /**
- * Build the overlay component around the injected React and overlay store.
+ * Build the panel component around the injected React and overlay store.
  * @param {object} input - inputs.
  * @param {object} input.React - the browser module table's React.
  * @param {object} input.store - overlay store from createOverlayStore().
@@ -27,45 +28,29 @@ export function createOverlayComponent({ React, store, MarkdownText }) {
   // React component types can be functions or forwardRef/memo objects.
   const renderMarkdown = MarkdownText !== undefined && MarkdownText !== null;
 
-  /** @returns {object|null} the rendered overlay, or null while closed. */
+  /** @returns {object|null} the rendered panel, or null while closed. */
   function BtwOverlay() {
     const state = React.useSyncExternalStore(store.subscribe, store.getState, store.getState);
     const view = buildOverlayView(state);
 
-    React.useEffect(() => {
-      if (!view.visible) return undefined;
-      const onKeyDown = (event) => {
-        if (event.key === ' ' || event.key === 'Enter' || event.key === 'Escape') {
-          event.preventDefault();
-          event.stopPropagation();
-          store.close();
-        }
-      };
-      document.addEventListener('keydown', onKeyDown, true);
-      return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [view.visible]);
-
     if (!view.visible) return null;
 
+    // The answer and the failure are rendered together: a stream that dies
+    // after 300 words must not make those words disappear.
     const answerBody =
-      view.status === 'error'
-        ? h('span', { className: 'dsh-btw-error' }, view.error ?? 'The side question failed.')
-        : view.answer.length > 0
-          ? renderMarkdown
-            ? h(MarkdownText, { text: view.answer })
-            : view.answer
-          : view.status === 'streaming'
-            ? h('span', { className: 'dsh-btw-thinking' }, 'Thinking…')
-            : '';
+      view.answer.length > 0
+        ? renderMarkdown
+          ? h(MarkdownText, { text: view.answer })
+          : view.answer
+        : view.status === 'streaming'
+          ? h('span', { className: 'dsh-btw-thinking' }, view.statusLabel)
+          : '';
 
     const attrs = {
-      className: 'dsh-btw-backdrop',
-      'data-shortcut-modal': 'btw',
-      role: 'dialog',
-      'aria-modal': 'true',
+      className: 'dsh-btw-dock',
+      role: 'region',
       'aria-label': 'Side question',
       'data-btw-status': view.status,
-      onMouseDown: () => store.close(),
     };
     if (view.cacheReadTokens !== null) {
       attrs['data-btw-cache-read-tokens'] = String(view.cacheReadTokens);
@@ -77,7 +62,18 @@ export function createOverlayComponent({ React, store, MarkdownText }) {
       h('style', { 'data-dsh-btw': '' }, OVERLAY_CSS),
       h(
         'div',
-        { className: 'dsh-btw-card', onMouseDown: (event) => event.stopPropagation() },
+        {
+          className: 'dsh-btw-card',
+          // Focusable so Escape works once the user clicks into the answer,
+          // without stealing focus from the composer when it opens.
+          tabIndex: -1,
+          onKeyDown: (event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            store.close();
+          },
+        },
         h(
           'div',
           { className: 'dsh-btw-title' },
@@ -94,7 +90,8 @@ export function createOverlayComponent({ React, store, MarkdownText }) {
           { className: renderMarkdown ? 'dsh-btw-answer dsh-btw-answer--markdown' : 'dsh-btw-answer' },
           answerBody,
         ),
-        view.truncationNote === null ? null : h('div', { className: 'dsh-btw-note' }, view.truncationNote),
+        view.note === null ? null : h('div', { className: 'dsh-btw-note' }, view.note),
+        view.error === null ? null : h('div', { className: 'dsh-btw-error' }, view.error),
         h(
           'div',
           { className: 'dsh-btw-footer' },

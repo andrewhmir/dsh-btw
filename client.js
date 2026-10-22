@@ -13,24 +13,28 @@ window.__ModuleLoader__.load({
 
 // ---- styles.mjs ------------------------------------------------------
 __dsh_btw.styles = (function () {
-// Stylesheet for the /btw overlay. Rendered as a <style> React element inside
-// the overlay root, so unmounting the overlay removes it. Every color/shadow
+// Stylesheet for the /btw floating card. Rendered as a <style> React element
+// inside the panel root, so unmounting the panel removes it. Every color/shadow
 // comes from the harness theme tokens; no hard-coded palette.
+//
+// The dock is click-through (`pointer-events:none`) so only the card itself
+// takes input; there is no backdrop and nothing covers the chat.
 
 const OVERLAY_CSS = [
-  '[data-shortcut-modal="btw"].dsh-btw-backdrop{position:absolute;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:24px;pointer-events:auto;background:color-mix(in srgb,var(--dsw-alias-bg-mask,rgba(8,12,10,.35)) 70%,transparent)}',
-  '.dsh-btw-card{box-sizing:border-box;display:flex;flex-direction:column;width:min(640px,100%);max-height:min(70vh,560px);padding:16px 18px;gap:10px;border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));border-radius:16px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#111);box-shadow:var(--dsw-shadow-lv2,0 16px 48px rgba(0,0,0,.25))}',
+  '[data-btw-status].dsh-btw-dock{position:absolute;right:20px;bottom:96px;z-index:30;display:flex;justify-content:flex-end;width:min(560px,calc(100% - 32px));pointer-events:none}',
+  '.dsh-btw-card{pointer-events:auto;box-sizing:border-box;display:flex;flex-direction:column;width:100%;max-height:min(60vh,520px);padding:14px 16px;gap:8px;border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));border-radius:14px;background:var(--dsw-alias-bg-base,#fff);color:var(--dsw-alias-label-primary,#111);box-shadow:var(--dsw-shadow-lv2,0 16px 48px rgba(0,0,0,.25))}',
+  '.dsh-btw-card:focus{outline:2px solid var(--dsw-alias-border-focus,rgba(0,120,255,.45));outline-offset:2px}',
   '.dsh-btw-title{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;line-height:18px;font-weight:600;color:var(--dsw-alias-label-secondary,#555)}',
   '.dsh-btw-close{border:0;background:transparent;color:var(--dsw-alias-label-secondary,#555);font-size:16px;line-height:1;padding:4px 8px;border-radius:8px;cursor:pointer}',
   '.dsh-btw-close:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary,#111)}',
   '.dsh-btw-question{border-left:2px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));padding-left:10px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary,#555);white-space:pre-wrap;overflow-wrap:anywhere}',
-  '.dsh-btw-answer{flex:1 1 auto;min-height:60px;overflow-y:auto;overscroll-behavior:contain;font-size:14px;line-height:22px;white-space:pre-wrap;overflow-wrap:anywhere}',
+  '.dsh-btw-answer{flex:1 1 auto;min-height:48px;overflow-y:auto;overscroll-behavior:contain;font-size:14px;line-height:22px;white-space:pre-wrap;overflow-wrap:anywhere}',
   '.dsh-btw-answer--markdown{white-space:normal}',
   '.dsh-btw-answer--markdown>:first-child{margin-top:0}',
   '.dsh-btw-answer--markdown>:last-child{margin-bottom:0}',
   '.dsh-btw-answer--markdown pre{max-width:100%;overflow-x:auto}',
   '.dsh-btw-thinking{color:var(--dsw-alias-label-secondary,#555)}',
-  '.dsh-btw-error{color:var(--dsw-alias-state-error-primary,#b3261e)}',
+  '.dsh-btw-error{border-top:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));padding-top:6px;font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary,#b3261e)}',
   '.dsh-btw-note{font-size:12px;line-height:18px;color:var(--dsw-alias-state-warn-primary,#8a5a00)}',
   '.dsh-btw-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary,#777)}',
   '.dsh-btw-status{font-variant-numeric:tabular-nums}',
@@ -42,29 +46,81 @@ const OVERLAY_CSS = [
 
 // ---- view-model.mjs --------------------------------------------------
 __dsh_btw.viewModel = (function () {
-// Pure presentation model for the /btw overlay, so the copy and the state
+// Pure presentation model for the /btw panel, so the copy and the state
 // mapping are testable without a DOM or React.
 
 /**
- * Map one overlay-store state to the view the component renders.
+ * Format a character count for the activity line ("1.5k").
+ * @param {number} value - non-negative character count.
+ * @returns {string} compact count.
+ */
+function formatCount(value) {
+  if (!Number.isFinite(value) || value <= 0) return '0';
+  if (value < 1000) return String(Math.floor(value));
+  const scaled = value / 1000;
+  return `${scaled >= 10 ? Math.round(scaled) : scaled.toFixed(1)}k`;
+}
+
+/**
+ * Explain an unusual ending without hiding the answer.
+ * @param {object} run - resolved run facts.
+ * @returns {string|null} note text, or null for an ordinary finish.
+ */
+function noteFor({ status, finish, answer, reasoningChars, continuations }) {
+  if (status === 'error') {
+    return answer.length > 0 ? 'The text above arrived before the stream ended.' : null;
+  }
+  if (finish !== 'max-tokens') return null;
+  if (answer.length === 0) {
+    return reasoningChars > 0
+      ? 'The output limit was reached during thinking, before any answer text arrived.'
+      : 'The output limit was reached before any answer text arrived.';
+  }
+  if (continuations > 0) {
+    return `Still cut off at the length limit after ${continuations} continuation${continuations === 1 ? '' : 's'}.`;
+  }
+  return 'The answer was cut off at the length limit.';
+}
+
+/**
+ * Map one store state to the view the component renders.
  * @param {object} state - overlay store state.
  * @returns {object} view fields.
  */
 function buildOverlayView(state) {
+  const status = typeof state?.status === 'string' ? state.status : 'idle';
+  const answer = typeof state?.answer === 'string' ? state.answer : '';
   const finish = state?.finish ?? null;
   const usage = state?.usage ?? null;
+  const reasoningChars = Number.isFinite(state?.reasoningChars) ? state.reasoningChars : 0;
+  const continuations = Number.isFinite(state?.continuations) ? state.continuations : 0;
+  const streaming = status === 'streaming';
+
+  let statusLabel = '';
+  if (streaming) {
+    statusLabel =
+      answer.length > 0
+        ? 'Answering…'
+        : reasoningChars > 0
+          ? `Thinking… ${formatCount(reasoningChars)}`
+          : 'Thinking…';
+  } else if (status === 'done' && continuations > 0) {
+    statusLabel = `continued ×${continuations}`;
+  }
+
   return {
     visible: state?.open === true,
     title: 'Side question — not saved to this conversation',
     question: typeof state?.question === 'string' ? state.question : '',
-    answer: typeof state?.answer === 'string' ? state.answer : '',
-    hint: 'Space / Enter / Esc to close',
+    answer,
+    hint: '× closes · Esc while this card is focused',
     error: typeof state?.error === 'string' ? state.error : null,
-    truncationNote: finish === 'max-tokens' ? 'The answer was cut off at the length limit.' : null,
-    statusLabel: state?.status === 'streaming' ? 'Answering…' : '',
+    errorCode: typeof state?.errorCode === 'string' ? state.errorCode : null,
+    note: noteFor({ status, finish, answer, reasoningChars, continuations }),
+    statusLabel,
     cacheReadTokens:
       usage !== null && Number.isFinite(usage.cacheReadTokens) ? usage.cacheReadTokens : null,
-    status: typeof state?.status === 'string' ? state.status : 'idle',
+    status,
   };
 }
   var api = {};
@@ -80,6 +136,9 @@ __dsh_btw.store = (function () {
 // generation; handlers captured by an older generation are inert, so late
 // chunks from an aborted request can never mutate a newer (or closed) overlay.
 //
+// A failure never discards the text that already arrived: `answer` survives
+// `onError`, so the panel can show the partial answer and the failure together.
+//
 // Pure module: no DOM, no React, no harness imports.
 
 /**
@@ -93,8 +152,13 @@ function createOverlayStore() {
     status: 'idle',
     answer: '',
     error: null,
+    errorCode: null,
     finish: null,
     usage: null,
+    /** Reasoning characters the provider streamed before the answer started. */
+    reasoningChars: 0,
+    /** Automatic continuation rounds spent on a truncated answer. */
+    continuations: 0,
   });
 
   let state = initialState();
@@ -133,7 +197,7 @@ function createOverlayStore() {
   /**
    * Begin one side question, replacing and aborting any run in flight.
    * @param {{sessionId: string, question: string}} input - run identity.
-   * @returns {{signal: AbortSignal, onDelta: Function, onDone: Function, onError: Function}} run bindings.
+   * @returns {{signal: AbortSignal, onDelta: Function, onDone: Function, onError: Function, onProgress: Function}} run bindings.
    */
   function start({ sessionId, question }) {
     if (controller !== null) controller.abort();
@@ -149,8 +213,11 @@ function createOverlayStore() {
       status: 'streaming',
       answer: '',
       error: null,
+      errorCode: null,
       finish: null,
       usage: null,
+      reasoningChars: 0,
+      continuations: 0,
     });
 
     return {
@@ -159,6 +226,10 @@ function createOverlayStore() {
         if (!live() || typeof text !== 'string' || text.length === 0) return;
         publish({ ...state, answer: state.answer + text });
       },
+      onProgress(frame) {
+        if (!live() || typeof frame?.reasoningChars !== 'number' || !Number.isFinite(frame.reasoningChars)) return;
+        publish({ ...state, reasoningChars: frame.reasoningChars });
+      },
       onDone(frame) {
         if (!live()) return;
         publish({
@@ -166,6 +237,14 @@ function createOverlayStore() {
           status: 'done',
           finish: typeof frame?.finish === 'string' ? frame.finish : 'stop',
           usage: frame?.usage ?? null,
+          continuations:
+            typeof frame?.continuations === 'number' && Number.isInteger(frame.continuations) && frame.continuations >= 0
+              ? frame.continuations
+              : state.continuations,
+          reasoningChars:
+            typeof frame?.reasoningChars === 'number' && Number.isFinite(frame.reasoningChars)
+              ? frame.reasoningChars
+              : state.reasoningChars,
         });
       },
       onError(error) {
@@ -173,7 +252,11 @@ function createOverlayStore() {
         publish({
           ...state,
           status: 'error',
-          error: typeof error?.message === 'string' && error.message.length > 0 ? error.message : 'The side question failed.',
+          error:
+            typeof error?.message === 'string' && error.message.length > 0
+              ? error.message
+              : 'The side question failed.',
+          errorCode: typeof error?.code === 'string' ? error.code : 'ERROR',
         });
       },
     };
@@ -202,9 +285,14 @@ __dsh_btw.stream = (function () {
 //
 // The host route answers POST /btw/ask with newline-delimited JSON frames:
 //   {"type":"delta","text":"…"}
-//   {"type":"done","finish":"stop","usage":{…}}
+//   {"type":"progress","reasoningChars":N}
+//   {"type":"done","finish":"stop"|"max-tokens","usage":{…},"continuations":N}
 //   {"type":"error","code":"…","message":"…"}
 // Chunks may split a line anywhere, so the reader buffers partial lines.
+//
+// The reader also guarantees a settlement: a body that ends without a done or
+// error frame (server died, proxy cut the socket) is reported as STREAM_ENDED
+// instead of leaving the overlay on "Thinking…" forever.
 //
 // Pure module: no DOM, no React, no harness imports.
 
@@ -212,7 +300,7 @@ __dsh_btw.stream = (function () {
  * Read one NDJSON response body and dispatch its frames.
  *
  * @param {ReadableStream<Uint8Array>} body - the response body stream.
- * @param {{onDelta: Function, onDone: Function, onError: Function}} handlers - frame handlers.
+ * @param {{onDelta: Function, onDone: Function, onError: Function, onProgress?: Function}} handlers - frame handlers.
  * @returns {Promise<void>} resolves when the stream ends or fails safely.
  */
 async function readNdjsonStream(body, handlers) {
@@ -225,26 +313,37 @@ async function readNdjsonStream(body, handlers) {
   const decoder = new TextDecoder();
   let buffer = '';
   let failed = false;
+  let settled = false;
+
+  /** Report one failure at most once. @param {object} error - code + message. */
+  const fail = (error) => {
+    if (failed || settled) return;
+    failed = true;
+    settled = true;
+    handlers.onError(error);
+  };
 
   const dispatch = (line) => {
-    if (failed || line.trim() === '') return;
+    if (settled || failed || line.trim() === '') return;
     let frame;
     try {
       frame = JSON.parse(line);
     } catch {
-      failed = true;
-      handlers.onError({ code: 'CORRUPT_STREAM', message: 'The side answer stream was corrupted.' });
+      fail({ code: 'CORRUPT_STREAM', message: 'The side answer stream was corrupted.' });
       return;
     }
     if (frame?.type === 'delta') {
       handlers.onDelta(typeof frame.text === 'string' ? frame.text : '');
     } else if (frame?.type === 'done') {
+      settled = true;
       handlers.onDone(frame);
     } else if (frame?.type === 'error') {
-      handlers.onError({
+      fail({
         code: typeof frame.code === 'string' ? frame.code : 'ERROR',
         message: typeof frame.message === 'string' ? frame.message : 'The side question failed.',
       });
+    } else if (frame?.type === 'progress' && typeof handlers.onProgress === 'function') {
+      handlers.onProgress(frame);
     }
     // Unknown frame types are ignored so a future host can add metadata.
   };
@@ -271,13 +370,14 @@ async function readNdjsonStream(body, handlers) {
     }
     buffer += decoder.decode();
     if (buffer.trim() !== '') dispatch(buffer.replace(/\r$/, ''));
-  } catch (error) {
-    if (!failed) {
-      handlers.onError({
-        code: typeof error?.code === 'string' ? error.code : 'STREAM_ERROR',
-        message: error?.message ?? String(error),
-      });
+    if (!settled && !failed) {
+      fail({ code: 'STREAM_ENDED', message: 'The side answer stream ended before it finished.' });
     }
+  } catch (error) {
+    fail({
+      code: typeof error?.code === 'string' ? error.code : 'STREAM_ERROR',
+      message: error?.message ?? String(error),
+    });
   }
 }
 
@@ -290,7 +390,7 @@ async function readNdjsonStream(body, handlers) {
  * @param {string} input.question - the trimmed question.
  * @param {AbortSignal} [input.signal] - dismissal/abort signal.
  * @param {Function} [input.fetchImpl] - fetch override for tests.
- * @param {{onDelta: Function, onDone: Function, onError: Function}} input.handlers - frame handlers.
+ * @param {{onDelta: Function, onDone: Function, onError: Function, onProgress?: Function}} input.handlers - frame handlers.
  * @returns {Promise<void>} resolves when settled; never rejects for expected failures.
  */
 async function askBtw({ url, sessionId, question, signal, fetchImpl, handlers }) {
@@ -511,15 +611,16 @@ function createBtwSource({ submitQuestion }) {
 
 // ---- overlay.mjs -----------------------------------------------------
 __dsh_btw.overlay = (function () {
-// The /btw overlay: a dismissible, centred panel over the whole app frame.
+// The /btw panel: a dismissible, NON-MODAL floating card in the app frame.
 //
 // Registered as a `shell.overlay` list entry (see client-entry.js). While
-// closed it renders null, so the additive slot stays click-through. While open:
-//   * Escape, Space, and Enter dismiss it from a capture-phase listener;
-//   * a backdrop click or the close button dismisses it;
-//   * `role="dialog" aria-modal="true"` + `data-shortcut-modal="btw"` tell the
-//     shortcuts service this is the modal owner, so background shortcuts and
-//     the conversation's double-Escape stop do not react.
+// closed it renders null. While open:
+//   * the card floats above the chat (bottom-right) and the rest of the app
+//     stays fully interactive: no backdrop, no focus trap, no global keys;
+//   * the × button closes it, and Escape closes it while the card has focus;
+//   * role="region" (never dialog/aria-modal) keeps the shortcuts service from
+//     treating it as the modal owner, so composer and conversation shortcuts
+//     keep working while an answer streams.
 //
 // The root also exposes `data-btw-status` and `data-btw-cache-read-tokens` as
 // verification hooks for the E2E script; they are not shown to the user.
@@ -530,7 +631,7 @@ const viewModel = __dsh_btw.viewModel;
 const { buildOverlayView } = __dsh_btw.viewModel;
 
 /**
- * Build the overlay component around the injected React and overlay store.
+ * Build the panel component around the injected React and overlay store.
  * @param {object} input - inputs.
  * @param {object} input.React - the browser module table's React.
  * @param {object} input.store - overlay store from createOverlayStore().
@@ -542,45 +643,29 @@ function createOverlayComponent({ React, store, MarkdownText }) {
   // React component types can be functions or forwardRef/memo objects.
   const renderMarkdown = MarkdownText !== undefined && MarkdownText !== null;
 
-  /** @returns {object|null} the rendered overlay, or null while closed. */
+  /** @returns {object|null} the rendered panel, or null while closed. */
   function BtwOverlay() {
     const state = React.useSyncExternalStore(store.subscribe, store.getState, store.getState);
     const view = buildOverlayView(state);
 
-    React.useEffect(() => {
-      if (!view.visible) return undefined;
-      const onKeyDown = (event) => {
-        if (event.key === ' ' || event.key === 'Enter' || event.key === 'Escape') {
-          event.preventDefault();
-          event.stopPropagation();
-          store.close();
-        }
-      };
-      document.addEventListener('keydown', onKeyDown, true);
-      return () => document.removeEventListener('keydown', onKeyDown, true);
-    }, [view.visible]);
-
     if (!view.visible) return null;
 
+    // The answer and the failure are rendered together: a stream that dies
+    // after 300 words must not make those words disappear.
     const answerBody =
-      view.status === 'error'
-        ? h('span', { className: 'dsh-btw-error' }, view.error ?? 'The side question failed.')
-        : view.answer.length > 0
-          ? renderMarkdown
-            ? h(MarkdownText, { text: view.answer })
-            : view.answer
-          : view.status === 'streaming'
-            ? h('span', { className: 'dsh-btw-thinking' }, 'Thinking…')
-            : '';
+      view.answer.length > 0
+        ? renderMarkdown
+          ? h(MarkdownText, { text: view.answer })
+          : view.answer
+        : view.status === 'streaming'
+          ? h('span', { className: 'dsh-btw-thinking' }, view.statusLabel)
+          : '';
 
     const attrs = {
-      className: 'dsh-btw-backdrop',
-      'data-shortcut-modal': 'btw',
-      role: 'dialog',
-      'aria-modal': 'true',
+      className: 'dsh-btw-dock',
+      role: 'region',
       'aria-label': 'Side question',
       'data-btw-status': view.status,
-      onMouseDown: () => store.close(),
     };
     if (view.cacheReadTokens !== null) {
       attrs['data-btw-cache-read-tokens'] = String(view.cacheReadTokens);
@@ -592,7 +677,18 @@ function createOverlayComponent({ React, store, MarkdownText }) {
       h('style', { 'data-dsh-btw': '' }, OVERLAY_CSS),
       h(
         'div',
-        { className: 'dsh-btw-card', onMouseDown: (event) => event.stopPropagation() },
+        {
+          className: 'dsh-btw-card',
+          // Focusable so Escape works once the user clicks into the answer,
+          // without stealing focus from the composer when it opens.
+          tabIndex: -1,
+          onKeyDown: (event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            store.close();
+          },
+        },
         h(
           'div',
           { className: 'dsh-btw-title' },
@@ -609,7 +705,8 @@ function createOverlayComponent({ React, store, MarkdownText }) {
           { className: renderMarkdown ? 'dsh-btw-answer dsh-btw-answer--markdown' : 'dsh-btw-answer' },
           answerBody,
         ),
-        view.truncationNote === null ? null : h('div', { className: 'dsh-btw-note' }, view.truncationNote),
+        view.note === null ? null : h('div', { className: 'dsh-btw-note' }, view.note),
+        view.error === null ? null : h('div', { className: 'dsh-btw-error' }, view.error),
         h(
           'div',
           { className: 'dsh-btw-footer' },

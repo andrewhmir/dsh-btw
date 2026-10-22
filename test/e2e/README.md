@@ -17,7 +17,7 @@ install a community user gets, so it is the only install these scripts trust.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File clean-room.ps1 `
-  -PackageSpec <absolute package dir OR npm spec like @andrewhmir/dsh-btw@0.1.2> `
+  -PackageSpec <absolute package dir OR npm spec like @andrewhmir/dsh-btw@0.2.0> `
   -HomeDir <a directory that does NOT exist yet> `
   -CliPrefix <prefix holding node_modules/@deepseek-ai/dsh> `
   -Port 3166 -KeepRunning
@@ -59,12 +59,16 @@ node cdp-e2e.mjs --port 9222 --url "<URL>" --mode dismiss-keys
 node cdp-e2e.mjs --port 9222 --url "<URL>" --mode mid-stream --question-marker BTW-MID-<stamp>
 ```
 
-- `probe` reports the composer/overlay structure and attempts one side question;
+- `probe` reports the composer/panel structure and attempts one side question;
   use it first when GUI markup has drifted.
-- `full` asserts the overlay appears, the answer streams, the question is shown,
-  uppercase `/BTW` keeps its question, Markdown renders, a second warm call
-  reports `cacheReadTokens > 0`, and Escape closes it.
-- `dismiss-keys` asserts Escape, Space, and Enter each dismiss the overlay.
+- `full` asserts the panel appears as a **non-modal dock** (no backdrop), the
+  answer streams, the question is shown, uppercase `/BTW` keeps its question,
+  Markdown renders, a second warm call reports `cacheReadTokens > 0`, and the ×
+  button closes it.
+- `dismiss-keys` asserts the non-modal contract: no backdrop, the composer stays
+  editable while the panel is open, × closes it, Escape closes it only while the
+  card has focus, Escape in the composer leaves it open, and Space/Enter no
+  longer dismiss it.
 - `mid-stream` starts a ~20 s main turn, asks `/btw` while it streams, and waits
   for both the side answers and the main turn to finish.
 

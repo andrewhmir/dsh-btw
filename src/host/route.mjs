@@ -5,14 +5,36 @@
 // reads the live session's model-visible history, appends exactly one frozen
 // user message, and forwards the provider stream to the browser.
 //
+// Two answers about "why did long answers break" live here:
+//   * the routed Messages protocol counts thinking against `max_tokens`, so the
+//     budget has to cover reasoning AND text (hence the larger default and the
+//     thinking-off retry when the budget dies before any text exists);
+//   * a truncated finish is not the end of the answer: the route continues from
+//     the partial text instead of handing the user half a sentence.
+// Aborts are a stall watchdog plus a hard ceiling, never a wall clock that kills
+// a healthy answer mid-stream.
+//
 // Pure route logic in the sense that every harness dependency is injected, so
 // tests can drive `createBtwHost` with fakes and no running harness.
 
 import { MAX_BODY_BYTES, MAX_QUESTION_CHARS, resolveConfig } from './config.mjs';
-import { buildRequestEnvelope } from './prompt.mjs';
+import { buildContinuationTurn, buildRequestEnvelope } from './prompt.mjs';
 
 /** Loopback addresses this plugin accepts. */
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+/**
+ * Reasoning characters buffered before a progress frame is written. Throttling
+ * by volume keeps a chatty thinking stream from producing hundreds of writes
+ * while still proving liveness to the overlay.
+ */
+const PROGRESS_CHARS = 200;
+
+const ABORT_REASONS = {
+  stall: 'stall',
+  deadline: 'deadline',
+  client: 'client',
+};
 
 /** @param {object} req @returns {boolean} whether the request came from loopback. */
 export function isLoopback(req) {
@@ -89,28 +111,51 @@ function readBody(req) {
 }
 
 /**
- * Map a terminal finish reason to the single closing NDJSON frame.
- * @param {object|undefined} reason - provider FinishReason.
- * @param {object|undefined} usage - last reported TokenUsage.
- * @returns {object} a done or error frame.
+ * Render a watchdog duration for a human ("60s", "500ms").
+ * @param {number} ms - numeric timeout.
+ * @returns {string} compact duration.
  */
-function finishFrame(reason, usage) {
-  const kind = reason?.kind;
-  const withUsage = usage === undefined ? {} : { usage };
-  if (kind === 'stop') return { type: 'done', finish: 'stop', ...withUsage };
-  if (kind === 'max-tokens') return { type: 'done', finish: 'max-tokens', ...withUsage };
-  if (kind === 'tool-calls') {
+function describeDuration(ms) {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${Math.round(ms / 1000)}s`;
+}
+
+/**
+ * Map one failed/aborted watchdog to the closing error frame.
+ * @param {string|null} abortedBy - the watchdog that fired.
+ * @param {{stallTimeoutMs: number, deadlineMs: number}} limits - resolved limits.
+ * @returns {{code: string, message: string}} failure facts.
+ */
+function abortFailure(abortedBy, { stallTimeoutMs, deadlineMs }) {
+  if (abortedBy === ABORT_REASONS.stall) {
     return {
-      type: 'error',
-      code: 'UNEXPECTED_TOOL_CALLS',
-      message: 'the model attempted a tool call although no tools were sent',
+      code: 'STALLED',
+      message: `the model stopped sending output for ${describeDuration(stallTimeoutMs)}`,
     };
   }
-  const failure = reason?.failure ?? {};
+  if (abortedBy === ABORT_REASONS.deadline) {
+    return {
+      code: 'DEADLINE',
+      message: `the side question exceeded the ${describeDuration(deadlineMs)} deadline`,
+    };
+  }
+  return { code: 'ABORTED', message: 'the side question was aborted' };
+}
+
+/**
+ * Build the closing done frame.
+ * @param {string} finish - terminal finish kind ('stop' | 'max-tokens').
+ * @param {object|undefined} usage - last reported TokenUsage.
+ * @param {{continuations: number, reasoningChars: number}} facts - run counters.
+ * @returns {object} the done frame.
+ */
+function doneFrame(finish, usage, { continuations, reasoningChars }) {
   return {
-    type: 'error',
-    code: typeof failure.code === 'string' ? failure.code : kind === 'aborted' ? 'ABORTED' : 'INTERNAL',
-    message: typeof failure.message === 'string' ? failure.message : 'the model request failed',
+    type: 'done',
+    finish,
+    ...(usage === undefined ? {} : { usage }),
+    ...(continuations === 0 ? {} : { continuations }),
+    ...(reasoningChars === 0 ? {} : { reasoningChars }),
   };
 }
 
@@ -122,11 +167,11 @@ function finishFrame(reason, usage) {
  * @param {{get: (id: string) => object | undefined}} deps.agents - live agent registry.
  * @param {{stream: (options: object) => AsyncIterable<object>}} deps.llm - LLM runtime.
  * @param {object} [deps.logger] - optional harness logger.
- * @param {object} [deps.config] - raw optional row config (`maxTokens`, `timeoutMs`).
+ * @param {object} [deps.config] - raw optional row config (`maxTokens`, `continuations`, `stallTimeoutMs`, `deadlineMs`/`timeoutMs`, `thinking`).
  * @returns {{handleRequest: (req: object, res: object) => Promise<void>, register: () => (() => void) | undefined}} host face.
  */
 export function createBtwHost({ webServer, agents, llm, logger, config }) {
-  const { maxTokens, timeoutMs } = resolveConfig(config);
+  const { maxTokens, continuations, stallTimeoutMs, deadlineMs, thinking } = resolveConfig(config);
 
   /**
    * One POST /btw/ask exchange.
@@ -202,6 +247,7 @@ export function createBtwHost({ webServer, agents, llm, logger, config }) {
         agent,
         question,
         maxTokens,
+        thinking,
         onHistoryTrimmed: (count) =>
           logger?.info?.(
             `btw: trimmed ${count} message(s) from a mid-turn snapshot so the replayed prefix is provider-valid`,
@@ -218,24 +264,61 @@ export function createBtwHost({ webServer, agents, llm, logger, config }) {
 
     const started = Date.now();
     const controller = new AbortController();
+    let abortedBy = null;
+    const abortWith = (reason) => {
+      if (controller.signal.aborted) return;
+      if (abortedBy === null) abortedBy = reason;
+      controller.abort();
+    };
     // Dismissal is a RESPONSE-socket event, not a request-body event:
     // `IncomingMessage` emits 'close' as soon as the body has been consumed on
     // Node 24, which would abort every healthy request. A response 'close'
     // before `writableFinished` is the client going away mid-stream.
     const onClose = () => {
-      if (res.writableFinished !== true) controller.abort();
+      if (res.writableFinished !== true) abortWith(ABORT_REASONS.client);
     };
     if (typeof res.on === 'function') res.on('close', onClose);
     const socket = req.socket;
     if (socket && typeof socket.on === 'function') socket.on('close', onClose);
-    const deadline = setTimeout(() => controller.abort(), timeoutMs);
+    // Hard ceiling only: a slow but streaming answer must not be killed.
+    const deadline = setTimeout(() => abortWith(ABORT_REASONS.deadline), deadlineMs);
     deadline.unref?.();
+
+    /** Restart the no-output watchdog; every chunk (thinking included) counts as liveness. */
+    let stallTimer = null;
+    const clearStall = () => {
+      if (stallTimer === null) return;
+      clearTimeout(stallTimer);
+      stallTimer = null;
+    };
+    const touchStall = () => {
+      clearStall();
+      stallTimer = setTimeout(() => abortWith(ABORT_REASONS.stall), stallTimeoutMs);
+      stallTimer.unref?.();
+    };
 
     let headersSent = false;
     let usage;
     let terminal = null;
+    let textSoFar = '';
+    let reasoningChars = 0;
+    let progressSent = 0;
+    let continuationsUsed = 0;
+    let thinkingFallbackUsed = false;
+    let rounds = 0;
+    let messages = envelope.messages;
+
     const writeFrame = (frame) => {
-      res.write(`${JSON.stringify(frame)}\n`);
+      try {
+        res.write(`${JSON.stringify(frame)}\n`);
+      } catch {
+        // The client went away; the stream is already unusable.
+      }
+    };
+    const flushProgress = () => {
+      if (reasoningChars <= progressSent) return;
+      progressSent = reasoningChars;
+      writeFrame({ type: 'progress', reasoningChars });
     };
 
     try {
@@ -246,45 +329,161 @@ export function createBtwHost({ webServer, agents, llm, logger, config }) {
       res.flushHeaders?.();
       headersSent = true;
       logger?.info?.(
-        `btw: side question started (model=${envelope.model}, messages=${envelope.messages.length}, questionLength=${question.length})`,
+        `btw: side question started (model=${envelope.model}, messages=${envelope.messages.length}, ` +
+          `questionLength=${question.length}, maxTokens=${envelope.maxTokens}, thinking=${thinking})`,
       );
+      touchStall();
 
-      for await (const chunk of llm.stream({ ...envelope, signal: controller.signal })) {
-        if (chunk === null || typeof chunk !== 'object') continue;
-        if (chunk.type === 'text-delta' && typeof chunk.text === 'string' && chunk.text.length > 0) {
-          writeFrame({ type: 'delta', text: chunk.text });
-        } else if (chunk.type === 'usage') {
-          usage = chunk.usage;
-        } else if (chunk.type === 'finish') {
-          terminal = finishFrame(chunk.reason, usage);
-          writeFrame(terminal);
+      let overrideRejected = false;
+
+      while (terminal === null) {
+        let roundText = '';
+        let roundUsage;
+        let finished;
+        let roundError;
+        // Rounds after the first only finish an answer that already exists:
+        // re-thinking would spend the budget twice on the same problem. The
+        // override is withdrawn again below when a route rejects "off", because
+        // a third-party model need not offer that level.
+        const overrideThinking = rounds > 0 && !overrideRejected;
+        const request = { ...envelope, messages, signal: controller.signal };
+        if (overrideThinking) request.reasoningEffort = 'off';
+
+        try {
+          for await (const chunk of llm.stream(request)) {
+            touchStall();
+            if (chunk === null || typeof chunk !== 'object') continue;
+            if (chunk.type === 'text-delta' && typeof chunk.text === 'string' && chunk.text.length > 0) {
+              roundText += chunk.text;
+              textSoFar += chunk.text;
+              writeFrame({ type: 'delta', text: chunk.text });
+            } else if (chunk.type === 'reasoning-delta' && typeof chunk.text === 'string') {
+              reasoningChars += chunk.text.length;
+              if (reasoningChars - progressSent >= PROGRESS_CHARS) flushProgress();
+            } else if (chunk.type === 'usage') {
+              roundUsage = chunk.usage;
+            } else if (chunk.type === 'finish') {
+              finished = chunk.reason;
+              break;
+            }
+          }
+        } catch (error) {
+          roundError = error;
+        }
+        if (roundUsage !== undefined) usage = roundUsage;
+        rounds += 1;
+        flushProgress();
+
+        if (roundError !== undefined) {
+          // A rejected "off" level must not cost the user the rest of the answer:
+          // retry this attempt once with the routed effort.
+          if (overrideThinking && roundText.length === 0) {
+            overrideRejected = true;
+            logger?.info?.('btw: the route rejected the thinking-off override; retrying with the routed effort');
+            continue;
+          }
+          terminal =
+            abortedBy === null
+              ? {
+                  type: 'error',
+                  code: typeof roundError?.code === 'string' ? roundError.code : 'INTERNAL',
+                  message: roundError?.message ?? String(roundError),
+                }
+              : { type: 'error', ...abortFailure(abortedBy, { stallTimeoutMs, deadlineMs }) };
           break;
         }
+
+        if (finished === undefined || finished === null) {
+          terminal =
+            abortedBy === null
+              ? { type: 'error', code: 'EMPTY_RESPONSE', message: 'the model returned no terminal result' }
+              : { type: 'error', ...abortFailure(abortedBy, { stallTimeoutMs, deadlineMs }) };
+          break;
+        }
+
+        const kind = finished.kind;
+        if (kind === 'stop') {
+          terminal = doneFrame('stop', usage, { continuations: continuationsUsed, reasoningChars });
+          break;
+        }
+        if (kind === 'max-tokens') {
+          // The budget died inside thinking: there is no partial text to
+          // continue from, so answer once more with thinking disabled.
+          if (textSoFar.trim().length === 0 && !thinkingFallbackUsed && thinking !== 'off') {
+            thinkingFallbackUsed = true;
+            logger?.info?.(
+              'btw: the output budget was spent before any answer text; retrying once without thinking',
+            );
+            continue;
+          }
+          if (roundText.trim().length === 0 || continuationsUsed >= continuations) {
+            terminal = doneFrame('max-tokens', usage, { continuations: continuationsUsed, reasoningChars });
+            break;
+          }
+          continuationsUsed += 1;
+          messages = [...messages, ...buildContinuationTurn(roundText)];
+          continue;
+        }
+        if (kind === 'tool-calls') {
+          terminal = {
+            type: 'error',
+            code: 'UNEXPECTED_TOOL_CALLS',
+            message: 'the model attempted a tool call although no tools were sent',
+          };
+          break;
+        }
+        // Same withdrawal for a route that reports the rejected level as a
+        // terminal error finish instead of throwing.
+        if (kind === 'error' && overrideThinking && roundText.length === 0 && abortedBy === null) {
+          overrideRejected = true;
+          logger?.info?.('btw: the route rejected the thinking-off override; retrying with the routed effort');
+          continue;
+        }
+        const reasonFailure = finished.failure ?? {};
+        terminal =
+          abortedBy === null
+            ? {
+                type: 'error',
+                code:
+                  typeof reasonFailure.code === 'string'
+                    ? reasonFailure.code
+                    : kind === 'aborted'
+                      ? 'ABORTED'
+                      : 'INTERNAL',
+                message:
+                  typeof reasonFailure.message === 'string'
+                    ? reasonFailure.message
+                    : 'the model request failed',
+              }
+            : { type: 'error', ...abortFailure(abortedBy, { stallTimeoutMs, deadlineMs }) };
+        break;
       }
 
-      if (terminal === null) {
-        terminal = { type: 'error', code: 'EMPTY_RESPONSE', message: 'the model returned no terminal result' };
-        writeFrame(terminal);
-      }
+      writeFrame(terminal);
     } catch (error) {
-      const failure = {
-        type: 'error',
-        code: typeof error?.code === 'string' ? error.code : 'INTERNAL',
-        message: error?.message ?? String(error),
-      };
-      terminal = failure;
-      if (headersSent) writeFrame(failure);
-      else sendError(res, 500, 'SNAPSHOT_FAILED', failure.message);
+      const failureFrame =
+        abortedBy === null
+          ? {
+              type: 'error',
+              code: typeof error?.code === 'string' ? error.code : 'INTERNAL',
+              message: error?.message ?? String(error),
+            }
+          : { type: 'error', ...abortFailure(abortedBy, { stallTimeoutMs, deadlineMs }) };
+      terminal = failureFrame;
+      if (headersSent) writeFrame(failureFrame);
+      else sendError(res, 500, 'SNAPSHOT_FAILED', failureFrame.message);
     } finally {
+      clearStall();
       clearTimeout(deadline);
       res.removeListener?.('close', onClose);
       socket?.removeListener?.('close', onClose);
       res.end();
-      const cacheReadTokens = usage?.cacheReadTokens;
       logger?.info?.(
         `btw: side answer settled (durationMs=${Date.now() - started}, ` +
           `finish=${terminal?.type === 'done' ? terminal.finish : terminal?.code ?? 'none'}, ` +
-          `cacheReadTokens=${cacheReadTokens ?? 'unknown'})`,
+          `rounds=${rounds}, continuations=${continuationsUsed}, ` +
+          `outputTokens=${usage?.outputTokens ?? 'unknown'}, reasoningChars=${reasoningChars}, ` +
+          `cacheReadTokens=${usage?.cacheReadTokens ?? 'unknown'})`,
       );
     }
   }

@@ -1,6 +1,6 @@
 {
   "name": "@andrewhmir/dsh-btw",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Ephemeral /btw side questions for the DeepSeek Harness Web GUI.",
   "type": "module",
   "main": "./host.js",

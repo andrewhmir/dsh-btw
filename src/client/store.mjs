@@ -4,6 +4,9 @@
 // generation; handlers captured by an older generation are inert, so late
 // chunks from an aborted request can never mutate a newer (or closed) overlay.
 //
+// A failure never discards the text that already arrived: `answer` survives
+// `onError`, so the panel can show the partial answer and the failure together.
+//
 // Pure module: no DOM, no React, no harness imports.
 
 /**
@@ -17,8 +20,13 @@ export function createOverlayStore() {
     status: 'idle',
     answer: '',
     error: null,
+    errorCode: null,
     finish: null,
     usage: null,
+    /** Reasoning characters the provider streamed before the answer started. */
+    reasoningChars: 0,
+    /** Automatic continuation rounds spent on a truncated answer. */
+    continuations: 0,
   });
 
   let state = initialState();
@@ -57,7 +65,7 @@ export function createOverlayStore() {
   /**
    * Begin one side question, replacing and aborting any run in flight.
    * @param {{sessionId: string, question: string}} input - run identity.
-   * @returns {{signal: AbortSignal, onDelta: Function, onDone: Function, onError: Function}} run bindings.
+   * @returns {{signal: AbortSignal, onDelta: Function, onDone: Function, onError: Function, onProgress: Function}} run bindings.
    */
   function start({ sessionId, question }) {
     if (controller !== null) controller.abort();
@@ -73,8 +81,11 @@ export function createOverlayStore() {
       status: 'streaming',
       answer: '',
       error: null,
+      errorCode: null,
       finish: null,
       usage: null,
+      reasoningChars: 0,
+      continuations: 0,
     });
 
     return {
@@ -83,6 +94,10 @@ export function createOverlayStore() {
         if (!live() || typeof text !== 'string' || text.length === 0) return;
         publish({ ...state, answer: state.answer + text });
       },
+      onProgress(frame) {
+        if (!live() || typeof frame?.reasoningChars !== 'number' || !Number.isFinite(frame.reasoningChars)) return;
+        publish({ ...state, reasoningChars: frame.reasoningChars });
+      },
       onDone(frame) {
         if (!live()) return;
         publish({
@@ -90,6 +105,14 @@ export function createOverlayStore() {
           status: 'done',
           finish: typeof frame?.finish === 'string' ? frame.finish : 'stop',
           usage: frame?.usage ?? null,
+          continuations:
+            typeof frame?.continuations === 'number' && Number.isInteger(frame.continuations) && frame.continuations >= 0
+              ? frame.continuations
+              : state.continuations,
+          reasoningChars:
+            typeof frame?.reasoningChars === 'number' && Number.isFinite(frame.reasoningChars)
+              ? frame.reasoningChars
+              : state.reasoningChars,
         });
       },
       onError(error) {
@@ -97,7 +120,11 @@ export function createOverlayStore() {
         publish({
           ...state,
           status: 'error',
-          error: typeof error?.message === 'string' && error.message.length > 0 ? error.message : 'The side question failed.',
+          error:
+            typeof error?.message === 'string' && error.message.length > 0
+              ? error.message
+              : 'The side question failed.',
+          errorCode: typeof error?.code === 'string' ? error.code : 'ERROR',
         });
       },
     };

@@ -1,6 +1,14 @@
 # @andrewhmir/dsh-btw bundle: one client+host plugin row. No host command is
 # registered on purpose - /btw is claimed client-side so nothing reaches the
 # session log.
+#
+# Optional row config (all defaults shown; every key is optional):
+#   config:
+#     maxTokens: 8192        # output budget for one answer, thinking included
+#     continuations: 2       # automatic "continue where you stopped" rounds (0 disables)
+#     stallTimeoutMs: 60000  # abort when no chunk arrives for this long
+#     deadlineMs: 600000     # hard ceiling for one side question (alias: timeoutMs)
+#     thinking: inherit      # 'inherit' the session's reasoning, or 'off' for speed
 - insert:
     - id: btw
       name: '@andrewhmir/dsh-btw'

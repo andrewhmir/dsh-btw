@@ -18,6 +18,13 @@ export const SIDE_QUESTION_INSTRUCTION = [
   'Question:',
 ].join('\n');
 
+/** Nudge appended after a truncated answer so the model resumes instead of restarting. */
+export const CONTINUE_INSTRUCTION = [
+  '[Continue the side answer.]',
+  'Continue exactly where you stopped. Do not repeat any text that already appears',
+  'above and do not add a preamble; output only the missing remainder.',
+].join('\n');
+
 /** Recursively freeze a plain JSON-like value. @param {any} value @returns {any} */
 function deepFreeze(value) {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -37,6 +44,23 @@ export function buildSideQuestionMessage(question) {
     role: 'user',
     content: [{ type: 'text', text: `${SIDE_QUESTION_INSTRUCTION}\n${question}` }],
   });
+}
+
+/**
+ * Build the two messages that resume a truncated answer.
+ *
+ * The partial text becomes an assistant turn (the request stays an append-only
+ * extension of the cached prefix), followed by one user message asking for the
+ * missing remainder.
+ *
+ * @param {string} partialText - the visible text streamed in the previous round.
+ * @returns {ReadonlyArray<object>} frozen assistant + user messages.
+ */
+export function buildContinuationTurn(partialText) {
+  return Object.freeze([
+    deepFreeze({ role: 'assistant', content: [{ type: 'text', text: partialText }] }),
+    deepFreeze({ role: 'user', content: [{ type: 'text', text: CONTINUE_INSTRUCTION }] }),
+  ]);
 }
 
 /**
@@ -122,11 +146,12 @@ export function sanitizeHistory(messages) {
  * @param {object} input - inputs for the envelope.
  * @param {object} input.agent - live Agent (needs `.session` and `.options`).
  * @param {string} input.question - the trimmed question text.
- * @param {number} input.maxTokens - completion cap for this call.
+ * @param {number} input.maxTokens - completion cap for this call (thinking included).
+ * @param {'inherit'|'off'} [input.thinking] - keep the routed reasoning effort, or disable thinking.
  * @param {(trimmed: number) => void} [input.onHistoryTrimmed] - called when a mid-turn snapshot had to be trimmed.
  * @returns {object} the request envelope (without `signal`).
  */
-export function buildRequestEnvelope({ agent, question, maxTokens, onHistoryTrimmed }) {
+export function buildRequestEnvelope({ agent, question, maxTokens, thinking, onHistoryTrimmed }) {
   const session = agent.session;
   const header = typeof session.requestHeader === 'function' ? session.requestHeader() : undefined;
   const route = header?.config ?? agent.options ?? {};
@@ -137,6 +162,18 @@ export function buildRequestEnvelope({ agent, question, maxTokens, onHistoryTrim
     error.code = 'NO_MODEL_ROUTE';
     throw error;
   }
+  // Never spend more output than the conversation itself is composed to allow.
+  const sessionCap =
+    typeof route.maxTokens === 'number' && Number.isFinite(route.maxTokens) && route.maxTokens > 0
+      ? route.maxTokens
+      : undefined;
+  const effectiveMaxTokens = sessionCap === undefined ? maxTokens : Math.min(maxTokens, sessionCap);
+  const reasoningEffort =
+    thinking === 'off'
+      ? 'off'
+      : typeof route.reasoningEffort === 'string'
+        ? route.reasoningEffort
+        : undefined;
   const { messages: history, trimmed } = sanitizeHistory(session.deriveMessages());
   if (trimmed > 0 && typeof onHistoryTrimmed === 'function') onHistoryTrimmed(trimmed);
   const messages = [...history, buildSideQuestionMessage(question)];
@@ -144,10 +181,10 @@ export function buildRequestEnvelope({ agent, question, maxTokens, onHistoryTrim
   return {
     provider,
     model,
-    ...(typeof route.reasoningEffort === 'string' ? { reasoningEffort: route.reasoningEffort } : {}),
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     ...(typeof route.temperature === 'number' ? { temperature: route.temperature } : {}),
     messages,
-    maxTokens,
+    maxTokens: effectiveMaxTokens,
     sessionId: session.id,
   };
 }

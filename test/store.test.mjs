@@ -2,6 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createOverlayStore } from '../src/client/store.mjs';
 
+const idle = {
+  open: false, sessionId: null, question: '', status: 'idle', answer: '',
+  error: null, errorCode: null, finish: null, usage: null, reasoningChars: 0, continuations: 0,
+};
+
 test('start opens a streaming overlay, deltas accumulate, done closes the stream state', () => {
   const store = createOverlayStore();
   const run = store.start({ sessionId: 's1', question: 'why?' });
@@ -22,6 +27,44 @@ test('start opens a streaming overlay, deltas accumulate, done closes the stream
   assert.equal(run.signal.aborted, false);
 });
 
+test('thinking progress is recorded until the answer starts', () => {
+  const store = createOverlayStore();
+  const run = store.start({ sessionId: 's1', question: 'q' });
+  run.onProgress({ type: 'progress', reasoningChars: 321 });
+  assert.equal(store.getState().reasoningChars, 321);
+  run.onProgress({ type: 'progress', reasoningChars: 900 });
+  assert.equal(store.getState().reasoningChars, 900);
+  run.onDelta('answer');
+  assert.equal(store.getState().answer, 'answer');
+  assert.equal(store.getState().reasoningChars, 900);
+});
+
+test('a failure keeps the partial answer and the reasoning progress', () => {
+  const store = createOverlayStore();
+  const run = store.start({ sessionId: 's1', question: 'q' });
+  run.onProgress({ reasoningChars: 120 });
+  run.onDelta('half an answer');
+  run.onError({ code: 'STALLED', message: 'the model stopped sending output' });
+  const state = store.getState();
+  assert.equal(state.status, 'error');
+  assert.equal(state.errorCode, 'STALLED');
+  assert.equal(state.error, 'the model stopped sending output');
+  assert.equal(state.answer, 'half an answer', 'partial text must survive the failure');
+  assert.equal(state.reasoningChars, 120);
+});
+
+test('done carries the continuation count and reasoning progress of a finished answer', () => {
+  const store = createOverlayStore();
+  const run = store.start({ sessionId: 's1', question: 'q' });
+  run.onDelta('done text');
+  run.onDone({ finish: 'stop', continuations: 1, reasoningChars: 44, usage: null });
+  const state = store.getState();
+  assert.equal(state.status, 'done');
+  assert.equal(state.continuations, 1);
+  assert.equal(state.reasoningChars, 44);
+  assert.equal(state.errorCode, null);
+});
+
 test('fail records an error and close aborts the signal and resets state', () => {
   const store = createOverlayStore();
   const run = store.start({ sessionId: 's1', question: 'q' });
@@ -30,10 +73,7 @@ test('fail records an error and close aborts the signal and resets state', () =>
   assert.equal(store.getState().error, 'slow down');
   store.close();
   assert.equal(run.signal.aborted, true);
-  assert.deepEqual(store.getState(), {
-    open: false, sessionId: null, question: '', status: 'idle',
-    answer: '', error: null, finish: null, usage: null,
-  });
+  assert.deepEqual(store.getState(), idle);
 });
 
 test('a newer start aborts the old run and ignores its late callbacks', () => {

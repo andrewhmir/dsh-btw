@@ -1,7 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveConfig, DEFAULT_MAX_TOKENS, DEFAULT_TIMEOUT_MS, MAX_QUESTION_CHARS } from '../src/host/config.mjs';
-import { SIDE_QUESTION_INSTRUCTION, buildSideQuestionMessage, buildRequestEnvelope, sanitizeHistory } from '../src/host/prompt.mjs';
+import {
+  resolveConfig,
+  DEFAULT_MAX_TOKENS,
+  DEFAULT_CONTINUATIONS,
+  DEFAULT_STALL_TIMEOUT_MS,
+  DEFAULT_DEADLINE_MS,
+  MAX_QUESTION_CHARS,
+} from '../src/host/config.mjs';
+import {
+  SIDE_QUESTION_INSTRUCTION,
+  CONTINUE_INSTRUCTION,
+  buildSideQuestionMessage,
+  buildContinuationTurn,
+  buildRequestEnvelope,
+  sanitizeHistory,
+} from '../src/host/prompt.mjs';
 
 const history = Object.freeze([
   Object.freeze({ role: 'system', content: Object.freeze([{ type: 'text', text: 'SYSTEM PROMPT' }]) }),
@@ -18,9 +32,31 @@ function fakeAgent({ header, options, id = 'sess-1' } = {}) {
 }
 
 test('resolveConfig applies defaults and rejects non-positive numbers', () => {
-  assert.deepEqual(resolveConfig(undefined), { maxTokens: DEFAULT_MAX_TOKENS, timeoutMs: DEFAULT_TIMEOUT_MS });
-  assert.deepEqual(resolveConfig({ maxTokens: 64, timeoutMs: 5000 }), { maxTokens: 64, timeoutMs: 5000 });
-  assert.deepEqual(resolveConfig({ maxTokens: -1, timeoutMs: 'x' }), { maxTokens: DEFAULT_MAX_TOKENS, timeoutMs: DEFAULT_TIMEOUT_MS });
+  assert.deepEqual(resolveConfig(undefined), {
+    maxTokens: DEFAULT_MAX_TOKENS,
+    continuations: DEFAULT_CONTINUATIONS,
+    stallTimeoutMs: DEFAULT_STALL_TIMEOUT_MS,
+    deadlineMs: DEFAULT_DEADLINE_MS,
+    thinking: 'inherit',
+  });
+  assert.equal(DEFAULT_MAX_TOKENS, 8192);
+  assert.deepEqual(resolveConfig({ maxTokens: 4096, timeoutMs: 5000, continuations: 0 }), {
+    maxTokens: 4096,
+    continuations: 0,
+    stallTimeoutMs: DEFAULT_STALL_TIMEOUT_MS,
+    deadlineMs: 5000,
+    thinking: 'inherit',
+  });
+  assert.equal(resolveConfig({ deadlineMs: 9000, timeoutMs: 5000 }).deadlineMs, 9000);
+  assert.deepEqual(resolveConfig({ maxTokens: -1, timeoutMs: 'x', continuations: -2 }), {
+    maxTokens: DEFAULT_MAX_TOKENS,
+    continuations: DEFAULT_CONTINUATIONS,
+    stallTimeoutMs: DEFAULT_STALL_TIMEOUT_MS,
+    deadlineMs: DEFAULT_DEADLINE_MS,
+    thinking: 'inherit',
+  });
+  assert.equal(resolveConfig({ thinking: 'off' }).thinking, 'off');
+  assert.equal(resolveConfig({ thinking: 'yes' }).thinking, 'inherit');
   assert.equal(MAX_QUESTION_CHARS, 4000);
 });
 
@@ -34,19 +70,42 @@ test('the side-question message is the instruction plus the question, deep-froze
   assert.ok(Object.isFrozen(message) && Object.isFrozen(message.content));
 });
 
+test('a continuation turn replays the partial answer and asks for the rest verbatim', () => {
+  const turn = buildContinuationTurn('the first part');
+  assert.equal(turn.length, 2);
+  assert.equal(turn[0].role, 'assistant');
+  assert.equal(turn[0].content[0].text, 'the first part');
+  assert.equal(turn[1].role, 'user');
+  assert.equal(turn[1].content[0].text, CONTINUE_INSTRUCTION);
+  assert.match(CONTINUE_INSTRUCTION, /exactly where you stopped/i);
+  assert.ok(Object.isFrozen(turn) && Object.isFrozen(turn[0]) && Object.isFrozen(turn[1]));
+});
+
 test('envelope inherits the routed header and appends exactly one message', () => {
   const agent = fakeAgent({ header: { config: { provider: 'deepseek-official', model: 'deepseek-flash', reasoningEffort: 'max', temperature: 0.3 } } });
-  const env = buildRequestEnvelope({ agent, question: 'q?', maxTokens: 1200 });
+  const env = buildRequestEnvelope({ agent, question: 'q?', maxTokens: 8192, thinking: 'inherit' });
   assert.equal(env.provider, 'deepseek-official');
   assert.equal(env.model, 'deepseek-flash');
   assert.equal(env.reasoningEffort, 'max');
   assert.equal(env.temperature, 0.3);
-  assert.equal(env.maxTokens, 1200);
+  assert.equal(env.maxTokens, 8192);
   assert.equal(env.sessionId, 'sess-1');
   assert.ok(Object.isFrozen(env.messages));
   assert.equal(env.messages.length, history.length + 1);
   assert.equal(env.messages[env.messages.length - 1].content[0].text, SIDE_QUESTION_INSTRUCTION + '\n' + 'q?');
   for (const key of ['tools', 'toolHistory', 'system', 'purpose']) assert.ok(!(key in env), key);
+});
+
+test('envelope never spends more than the session-composed output cap', () => {
+  const agent = fakeAgent({ header: { config: { provider: 'p', model: 'm', maxTokens: 2048 } } });
+  assert.equal(buildRequestEnvelope({ agent, question: 'q', maxTokens: 8192 }).maxTokens, 2048);
+  const roomy = fakeAgent({ header: { config: { provider: 'p', model: 'm', maxTokens: 64000 } } });
+  assert.equal(buildRequestEnvelope({ agent: roomy, question: 'q', maxTokens: 8192 }).maxTokens, 8192);
+});
+
+test('thinking off forces the reasoning effort off instead of inheriting it', () => {
+  const agent = fakeAgent({ header: { config: { provider: 'p', model: 'm', reasoningEffort: 'high' } } });
+  assert.equal(buildRequestEnvelope({ agent, question: 'q', maxTokens: 8192, thinking: 'off' }).reasoningEffort, 'off');
 });
 
 test('envelope falls back to agent options and omits absent sampling fields', () => {

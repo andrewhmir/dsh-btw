@@ -19,6 +19,7 @@ function recorder() {
       onDelta: (text) => events.push(['delta', text]),
       onDone: (frame) => events.push(['done', frame.finish, frame.usage?.cacheReadTokens]),
       onError: (error) => events.push(['error', error.code, error.message]),
+      onProgress: (frame) => events.push(['progress', frame.reasoningChars]),
     },
   };
 }
@@ -30,6 +31,23 @@ test('parses NDJSON split across arbitrary chunk boundaries, including CRLF', as
     'llo"}\r\n{"type":"delta","text":"!"}\n{"type":"done","finish":"stop","usage":{"cacheReadTokens":7}}\n',
   ]), handlers);
   assert.deepEqual(events, [['delta', 'Hello'], ['delta', '!'], ['done', 'stop', 7]]);
+});
+
+test('dispatches progress frames to onProgress', async () => {
+  const { events, handlers } = recorder();
+  await readNdjsonStream(bodyFrom([
+    '{"type":"progress","reasoningChars":420}\n{"type":"delta","text":"ok"}\n{"type":"done","finish":"stop"}\n',
+  ]), handlers);
+  assert.deepEqual(events, [['progress', 420], ['delta', 'ok'], ['done', 'stop', undefined]]);
+});
+
+test('a stream that ends without a terminal frame is reported as ended early', async () => {
+  const { events, handlers } = recorder();
+  await readNdjsonStream(bodyFrom(['{"type":"delta","text":"half"}\n']), handlers);
+  assert.deepEqual(events, [
+    ['delta', 'half'],
+    ['error', 'STREAM_ENDED', 'The side answer stream ended before it finished.'],
+  ]);
 });
 
 test('malformed JSON and error frames surface as a single error', async () => {

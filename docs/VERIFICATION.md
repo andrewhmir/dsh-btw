@@ -160,3 +160,61 @@ Each one was hit while producing the evidence above:
   command) needs an unconfined server.
 - **`Get-NetTCPConnection` cannot see listeners owned by another job**, so
   readiness is always an HTTP probe, never a socket-table check.
+
+## 0.2.0 — long answers truncated or blank (2026-10-22)
+
+### Diagnosis
+
+Two independent defects, both reproduced against the plugin's own route + client
+transport + store with scripted models (no provider call, no browser):
+
+1. **The output budget was shared with thinking.** `maxTokens` defaulted to 1200
+   and is passed as the wire `max_tokens` of the routed Messages protocol, which
+   counts reasoning tokens against the same budget. The session route
+   (`deepseek-account` / `deepseek-flash`, `reasoningEffort: high`) therefore
+   spent the answer's budget while thinking: a long answer stopped at
+   `finish: max-tokens`, and a thinking-heavy one produced **zero text deltas**
+   (reproduced: 0-character answer, `finish: max-tokens`).
+2. **An abort discarded the visible partial answer.** The route aborted at a hard
+   120 s wall clock, and the client rendered the error *instead of* the
+   accumulated answer (reproduced: 36 characters streamed, the card showed only
+   "the request was aborted").
+
+A third gap appeared while reproducing: a response body that ends without a
+terminal frame left the card unsettled with no error.
+
+### Fix (0.2.0)
+
+| area | change |
+|---|---|
+| budget | default 8192, additionally capped by the session's composed output cap |
+| thinking | inherited by default; when the budget is spent before any text, one retry runs with thinking off |
+| truncation | the partial answer is appended as an assistant turn and continued (`continuations`, default 2; continuation rounds run without thinking, and the override is withdrawn once if the route rejects that level) |
+| aborts | stall watchdog (no chunk for `stallTimeoutMs`, default 60 s) + `deadlineMs` ceiling (default 10 min), reported as `STALLED` / `DEADLINE` |
+| presentation | non-modal floating card: no backdrop, no `data-shortcut-modal`, Space/Enter never captured, × or focused Escape dismisses |
+| failures | partial text survives an error and is rendered together with it; a terminal-frame-less stream settles as `STREAM_ENDED` |
+| activity | throttled `progress` frames show reasoning progress as "Thinking… 1.5k" |
+
+### Evidence in this tree
+
+- Unit suite: **89 tests, 88 pass** (`node --test --test-isolation=none "test/*.test.mjs"`).
+  The one failure is `every e2e script parses`, whose `node --check` child
+  process is blocked by the confined Windows sandbox; every E2E script was
+  verified individually with `node --check` instead (all pass).
+- `node tools/build-client.mjs --check` → `client.js is up to date`.
+- Behaviour demo against the real route + transport + store (scripted models):
+  thinking-only budget → answer delivered after a thinking-off retry; truncated
+  answer → continued to a complete `finish: stop`; stalled stream → partial text
+  kept plus `STALLED`; presentation → `.dsh-btw-dock`, `role="region"`, no
+  backdrop, no `data-shortcut-modal`, no `aria-modal`.
+- Browser CLI (`cdp-e2e.mjs` `full` / `dismiss-keys`) was **updated** for the
+  non-modal contract but **not re-run** for 0.2.0: headless Chrome cannot be
+  spawned from the confined session that made this change. Treat the browser
+  assertions as pending until the clean-room run in
+  [`test/e2e/README.md`](../test/e2e/README.md) is executed unconfined.
+
+### Client bundle note
+
+The card is client-side, so an already-running GUI hot-swaps it from the rebuilt
+`client.js`; the host half (budget, continuation, watchdogs) needs a
+`dsh web` restart before the 0.2.0 behaviour is live.
